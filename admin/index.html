@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="pl">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="robots" content="noindex" />
+    <title>Dobre Mleko · Admin</title>
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Ccircle cx='8' cy='8' r='7' fill='%23D7301F'/%3E%3C/svg%3E"
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link
+      rel="stylesheet"
+      href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=Jost:wght@400;500;700;900&display=swap"
+    />
+    <link rel="stylesheet" href="style.css" />
+    <script type="module" src="app.js"></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="brand">
+        <span class="brand-mark" aria-hidden="true"></span>
+        <span class="brand-name">Dobre Mleko</span>
+        <span class="brand-tag">Admin</span>
+      </div>
+      <div id="who" class="who" hidden>
+        <span id="who-name"></span>
+        <button type="button" id="sign-out" class="btn btn-secondary btn-small">Wyloguj</button>
+      </div>
+    </header>
+
+    <main id="main">
+      <section id="view-loading" class="panel center">
+        <p class="label">Ładowanie…</p>
+      </section>
+
+      <section id="view-signin" class="panel signin" hidden>
+        <h1 class="display">Panel<br />admina</h1>
+        <p>Zaloguj się kontem Google z rolą admina.</p>
+        <div id="google-button"></div>
+        <p id="google-missing" class="hint" hidden>
+          Logowanie Google nie jest skonfigurowane (brak <code>GOOGLE_WEB_CLIENT_ID</code>).
+        </p>
+        <form id="dev-login" class="stack" hidden>
+          <p class="label">Logowanie deweloperskie</p>
+          <label for="dev-email">E-mail</label>
+          <input id="dev-email" type="email" required autocomplete="email" />
+          <button type="submit" class="btn btn-primary">Zaloguj</button>
+        </form>
+      </section>
+
+      <section id="view-denied" class="panel center" hidden>
+        <h1 class="display">Brak dostępu</h1>
+        <p>To konto nie ma roli admina.</p>
+      </section>
+
+      <section id="view-dashboard" hidden>
+        <dl id="stats" class="stats"></dl>
+
+        <nav class="tabs" aria-label="Sekcje">
+          <button type="button" class="tab" data-tab="people" aria-selected="true">Ludzie</button>
+          <button type="button" class="tab" data-tab="settings" aria-selected="false">Ustawienia</button>
+        </nav>
+
+        <section id="tab-people" class="tab-panel">
+          <form id="add-person" class="add-person">
+            <div class="field grow">
+              <label for="add-email">E-mail Google</label>
+              <input id="add-email" type="email" required placeholder="ola@gmail.com" autocomplete="off" />
+            </div>
+            <div class="field">
+              <label for="add-role">Rola</label>
+              <select id="add-role">
+                <option value="member">Członek</option>
+                <option value="admin">Admin</option>
+              </select>
+            </div>
+            <div class="field grow">
+              <label for="add-note">Notatka</label>
+              <input id="add-note" type="text" maxlength="200" placeholder="np. siostra Kuby" />
+            </div>
+            <button type="submit" class="btn btn-primary">Dodaj</button>
+          </form>
+          <p id="people-summary" class="label"></p>
+          <div class="table-wrap">
+            <table class="people">
+              <thead>
+                <tr>
+                  <th scope="col">Osoba</th>
+                  <th scope="col">Rola</th>
+                  <th scope="col">Notatka</th>
+                  <th scope="col">Aktywność</th>
+                  <th scope="col"><span class="visually-hidden">Akcje</span></th>
+                </tr>
+              </thead>
+              <tbody id="people-rows"></tbody>
+            </table>
+          </div>
+        </section>
+
+        <section id="tab-settings" class="tab-panel" hidden>
+          <div id="settings-list" class="settings"></div>
+        </section>
+      </section>
+    </main>
+
+    <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  </body>
+</html>

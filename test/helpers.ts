@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach } from 'vitest';
 import { buildApp } from '../src/app.js';
-import type { GoogleIdentity } from '../src/auth.js';
+import { ensureAdmins, type GoogleIdentity } from '../src/auth.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { createDb, migrate, type Sql } from '../src/db.js';
 import { HttpError } from '../src/errors.js';
@@ -13,13 +13,15 @@ export const DATABASE_URL = process.env.TEST_DATABASE_URL ?? 'postgres://mleko:m
 /** One photo directory per test file, removed afterwards. */
 export const PHOTO_DIR = mkdtempSync(join(tmpdir(), 'mleko-photos-'));
 
+/** Whitelisted as members before each test; ADMIN is the admin from the environment. */
 export const ALLOWED = ['ola@gmail.com', 'kuba@gmail.com', 'tomek@gmail.com'];
+export const ADMIN = 'marta@gmail.com';
 
 export function testConfig(overrides: Record<string, string> = {}): Config {
   return loadConfig({
     NODE_ENV: 'test',
     DATABASE_URL,
-    ALLOWED_EMAILS: ALLOWED.join(','),
+    ADMIN_EMAILS: ADMIN,
     GOOGLE_CLIENT_IDS: 'test-client',
     JWT_SECRET: 'test-secret-test-secret-test-secret-123',
     PHOTO_DIR,
@@ -64,7 +66,9 @@ export function setup(): Harness {
 
   beforeEach(async () => {
     h.clock.now = new Date('2026-10-11T12:00:00Z');
-    await h.sql`truncate users, places, place_photos, ratings, stars, comments, saved_places cascade`;
+    await h.sql`truncate users, places, place_photos, ratings, stars, comments, saved_places, allowed_emails, settings cascade`;
+    await ensureAdmins(h.sql, [ADMIN]);
+    for (const email of ALLOWED) await h.sql`insert into allowed_emails (email) values (${email})`;
   });
 
   afterAll(async () => {

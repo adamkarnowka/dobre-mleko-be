@@ -95,10 +95,12 @@ spec:
             - { name: DATABASE_URL, value: "postgres://mleko:$(POSTGRES_PASSWORD)@postgres:5432/mleko" }
             - name: JWT_SECRET
               valueFrom: { secretKeyRef: { name: dobre-mleko, key: JWT_SECRET } }
-            - name: ALLOWED_EMAILS
-              valueFrom: { secretKeyRef: { name: dobre-mleko, key: ALLOWED_EMAILS } }
+            - name: ADMIN_EMAILS
+              valueFrom: { secretKeyRef: { name: dobre-mleko, key: ADMIN_EMAILS } }
             - name: GOOGLE_CLIENT_IDS
               valueFrom: { secretKeyRef: { name: dobre-mleko, key: GOOGLE_CLIENT_IDS } }
+            - name: GOOGLE_WEB_CLIENT_ID
+              valueFrom: { secretKeyRef: { name: dobre-mleko, key: GOOGLE_WEB_CLIENT_ID } }
             - { name: PHOTO_DIR, value: /data/photos }
             # Unique per workflow run, so re-running the deploy after changing secrets restarts the pod.
             - { name: DEPLOY_ID, value: DEPLOY_ID_PLACEHOLDER }

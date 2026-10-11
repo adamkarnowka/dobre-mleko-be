@@ -1,5 +1,7 @@
+import { fileURLToPath } from 'node:url';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
+import fastifyStatic from '@fastify/static';
 import swagger from '@fastify/swagger';
 import Fastify, {
   type FastifyBaseLogger,
@@ -16,11 +18,12 @@ import {
   validatorCompiler,
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
-import { createGoogleVerifier, requireUser, Sessions, type GoogleVerifier } from './auth.js';
+import { createGoogleVerifier, requireAdmin, requireUser, Sessions, type GoogleVerifier } from './auth.js';
 import type { Config } from './config.js';
 import type { Sql } from './db.js';
 import { HttpError } from './errors.js';
 import { PhotoStore } from './photo-store.js';
+import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
 import { commentRoutes } from './routes/comments.js';
 import { meRoutes } from './routes/me.js';
@@ -30,6 +33,7 @@ import { placeRoutes } from './routes/places.js';
 import { ratingRoutes } from './routes/ratings.js';
 import { statsRoutes } from './routes/stats.js';
 import { ErrorBody } from './schemas.js';
+import { PHOTO_BYTES_CEILING, Settings } from './settings.js';
 
 export interface AppDeps {
   config: Config;
@@ -44,8 +48,11 @@ export interface Ctx {
   sql: Sql;
   sessions: Sessions;
   verifyGoogle: GoogleVerifier;
-  allowed: Set<string>;
+  /** Signed-in and whitelisted. */
   auth: preHandlerHookHandler;
+  /** Signed-in, whitelisted admin. */
+  admin: preHandlerHookHandler;
+  settings: Settings;
   photos: PhotoStore;
   now: () => Date;
 }
@@ -65,7 +72,8 @@ export async function buildApp(deps: AppDeps) {
   app.setSerializerCompiler(serializerCompiler);
 
   await app.register(cors, { origin: config.CORS_ORIGINS.length ? config.CORS_ORIGINS : false });
-  await app.register(multipart, { limits: { fileSize: config.MAX_PHOTO_BYTES, files: 1 } });
+  // The effective size limit is the maxPhotoBytes setting, applied per upload.
+  await app.register(multipart, { limits: { fileSize: PHOTO_BYTES_CEILING, files: 1 } });
   await app.register(swagger, {
     openapi: {
       info: {
@@ -105,14 +113,17 @@ export async function buildApp(deps: AppDeps) {
   );
 
   const sessions = new Sessions(config);
-  const allowed = new Set(config.ALLOWED_EMAILS);
+  const auth = requireUser({ sessions, sql });
   const ctx: Ctx = {
     config,
     sql,
     sessions,
-    allowed,
-    verifyGoogle: deps.verifyGoogle ?? createGoogleVerifier(config.GOOGLE_CLIENT_IDS),
-    auth: requireUser({ sessions, sql, allowed }),
+    verifyGoogle:
+      deps.verifyGoogle ??
+      createGoogleVerifier([...config.GOOGLE_CLIENT_IDS, config.GOOGLE_WEB_CLIENT_ID].filter(Boolean)),
+    auth,
+    admin: requireAdmin(auth),
+    settings: new Settings(sql),
     photos: new PhotoStore(config.PHOTO_DIR),
     now: deps.now ?? (() => new Date()),
   };
@@ -122,7 +133,7 @@ export async function buildApp(deps: AppDeps) {
     if (!route.schema || route.schema.hide) return;
     const schema = route.schema as Record<string, unknown>;
     schema.response = { ...(schema.response as object), '4xx': ErrorBody };
-    schema.security = route.preHandler === ctx.auth ? [{ bearerAuth: [] }] : [];
+    schema.security = route.preHandler === ctx.auth || route.preHandler === ctx.admin ? [{ bearerAuth: [] }] : [];
   });
 
   app.get('/healthz', { schema: { hide: true } }, async () => {
@@ -139,9 +150,40 @@ export async function buildApp(deps: AppDeps) {
     commentRoutes,
     photoRoutes,
     statsRoutes,
+    adminRoutes,
   ]) {
     routes(app, ctx);
   }
 
+  // Admin dashboard: static files, no build step. Strict CSP: only our own scripts plus Google sign-in.
+  await app.register(fastifyStatic, {
+    root: adminDir,
+    prefix: '/admin/',
+    index: 'index.html',
+    setHeaders: (res) => {
+      res.header(
+        'content-security-policy',
+        [
+          "default-src 'self'",
+          "script-src 'self' https://accounts.google.com/gsi/client",
+          "style-src 'self' https://accounts.google.com/gsi/style https://fonts.googleapis.com",
+          'font-src https://fonts.gstatic.com',
+          "img-src 'self' https: data:",
+          'frame-src https://accounts.google.com/gsi/',
+          "connect-src 'self' https://accounts.google.com/gsi/",
+          "frame-ancestors 'none'",
+          "base-uri 'none'",
+        ].join('; '),
+      );
+      res.header('referrer-policy', 'no-referrer');
+      res.header('x-content-type-options', 'nosniff');
+      // Lets the Google sign-in popup report back.
+      res.header('cross-origin-opener-policy', 'same-origin-allow-popups');
+    },
+  });
+  app.get('/admin', { schema: { hide: true } }, (_req, reply) => reply.redirect('/admin/'));
+
   return app;
 }
+
+const adminDir = fileURLToPath(new URL('../admin/', import.meta.url));

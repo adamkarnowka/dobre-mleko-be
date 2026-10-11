@@ -1,7 +1,7 @@
 # dobre-mleko-be
 
 Backend for **Dobre Mleko**: place ratings like Google Maps, but only from friends.
-Only Google accounts on a whitelist can sign in.
+Only Google accounts on a whitelist can sign in; admins manage the whitelist and settings in a dashboard at `/admin/`.
 
 Node 22 · TypeScript · Fastify · Postgres 16.
 
@@ -10,7 +10,7 @@ Node 22 · TypeScript · Fastify · Postgres 16.
 ## Run locally
 
 ```sh
-cp .env.example .env     # set DATABASE_URL, ALLOWED_EMAILS, ...
+cp .env.example .env     # set DATABASE_URL, ADMIN_EMAILS, ...
 createdb mleko
 npm install
 npm run dev
@@ -18,7 +18,8 @@ npm run dev
 
 Migrations in `migrations/` run on startup (`npm run migrate` runs them on their own).
 With `DEV_LOGIN=true` (ignored in production) `POST /auth/dev {"email": "..."}` signs you in
-as a whitelisted email without Google, which is handy while building the mobile app.
+as a whitelisted email without Google, which is handy while building the mobile app. The dashboard at
+http://localhost:8080/admin/ then shows an e-mail sign-in form too.
 
 ### Tests
 
@@ -36,13 +37,11 @@ npm run openapi -- openapi.json   # the OpenAPI document, as published to the do
 | Variable | Default | |
 |---|---|---|
 | `DATABASE_URL` | – | Postgres connection string |
-| `ALLOWED_EMAILS` | – | Comma-separated Google emails that may sign in. Removing an email cuts that person off on their next request. |
-| `GOOGLE_CLIENT_IDS` | – | Comma-separated OAuth client IDs (iOS, Android, web) whose ID tokens are accepted |
+| `ADMIN_EMAILS` | – | Comma-separated admins. Always whitelisted with the admin role (re-applied at every start) and cannot be removed or demoted in the dashboard, so nobody can lock everyone out. |
+| `GOOGLE_CLIENT_IDS` | – | Comma-separated OAuth client IDs of the mobile apps whose ID tokens are accepted |
+| `GOOGLE_WEB_CLIENT_ID` | – | OAuth client ID of type "Web application" for the dashboard's sign-in button (authorised JavaScript origin: `https://<API_HOST>`) |
 | `JWT_SECRET` | – | At least 32 characters, signs session tokens |
-| `SESSION_TTL_DAYS` | `30` | |
-| `STARS_PER_MONTH` | `3` | Golden stars per person per month |
 | `TIME_ZONE` | `Europe/Warsaw` | Month boundaries for stars, "open now" |
-| `MAX_PHOTO_BYTES` | `8388608` | |
 | `PHOTO_DIR` | `./data/photos` | Where photo files are stored (a volume in production) |
 | `CORS_ORIGINS` | none | Only needed for a browser client |
 | `DEV_LOGIN` | `false` | Enables `POST /auth/dev` outside production |
@@ -58,12 +57,40 @@ generated from the route schemas in `src/` (responses are checked against the sa
   `POST`, `GET`, `PATCH`, `DELETE /places/:id`, `PUT|DELETE /places/:id/saved`.
 - **Ratings:** `PUT|DELETE /places/:id/rating` with `vibe` and `offer` (required) and `service`, `value`
   (optional, "nie dotyczy"), each 1–5. Ranking uses a Bayesian average (prior weight of 3 ratings).
-- **Golden stars:** `POST|DELETE /places/:id/star`, `STARS_PER_MONTH` per person, once per place per month,
+- **Golden stars:** `POST|DELETE /places/:id/star`, `starsPerMonth` per person, once per place per month,
   no effect on the rating.
 - **Comments, photos, stats:** `/places/:id/comments`, `/places/:id/photos`, `/photos/:hash`, `/stats/network`,
   `/stats/me`, plus `/me`, `/me/saved`, `/me/ratings` and `/meta`.
 
 Errors look like `{"error": {"code": "not_whitelisted", "message": "..."}}`.
+
+### Whitelist, admins and settings
+
+Who may sign in lives in the database (`allowed_emails`): each entry is an e-mail with the role `member` or
+`admin` and an optional note, and can exist before the person first signs in. Every request re-checks the
+whitelist and role, so removing someone or changing their role applies immediately to their existing session;
+their places, ratings and comments stay. Admins cannot demote or remove themselves or anyone in `ADMIN_EMAILS`.
+
+Runtime settings (`settings` table, defaults in `src/settings.ts`), editable in the dashboard:
+
+| Setting | Default | |
+|---|---|---|
+| `starsPerMonth` | `3` | Golden stars per person per month |
+| `sessionTtlDays` | `30` | Sign-in length, for new sign-ins |
+| `maxPhotoBytes` | 8 MB | Largest photo upload (100 KB – 25 MB) |
+| `maxPhotosPerPlace` | `12` | Photos per place |
+
+Secrets and infrastructure (database, JWT secret, Google client IDs, time zone, photo directory) stay in
+environment variables. Admin endpoints are under `/admin/*` in the API docs.
+
+### Admin dashboard
+
+`/admin/` is a static page (plain HTML, CSS and JS in `admin/`, no build step) served by the API, with a strict
+Content-Security-Policy. It signs in with Google (needs `GOOGLE_WEB_CLIENT_ID`) and offers:
+
+- **Ludzie:** add people (e-mail, role, note), change roles and notes, remove people; shows who has signed in,
+  when they were last active and how many places and ratings they have.
+- **Ustawienia:** the settings above with their defaults and ranges, who changed them and when, and a reset.
 
 ### Photos
 
@@ -81,10 +108,11 @@ Traefik ingress with a cert-manager certificate. The API is deployed with the `R
 photo volume can be mounted by one pod at a time, so a deploy has a few seconds of downtime.
 
 Repository secrets: `VPS_HOST`, `VPS_SSH_KEY`, `POSTGRES_PASSWORD` (letters and digits only, because it goes
-into a URL: `openssl rand -hex 24`), `JWT_SECRET` (`openssl rand -base64 48`), `ALLOWED_EMAILS`.
-Repository variables: `API_HOST` (the API's domain), `GOOGLE_CLIENT_IDS`.
+into a URL: `openssl rand -hex 24`), `JWT_SECRET` (`openssl rand -base64 48`), `ADMIN_EMAILS`.
+Repository variables: `API_HOST` (the API's domain), `GOOGLE_CLIENT_IDS`, `GOOGLE_WEB_CLIENT_ID`.
 
-To change the whitelist, edit the `ALLOWED_EMAILS` secret and re-run the "Build and deploy" workflow.
+The whitelist and settings are managed in the dashboard at `https://<API_HOST>/admin/`. Changing `ADMIN_EMAILS`
+needs the secret edited and the "Build and deploy" workflow re-run.
 After the first run, make the GHCR package public or add an image pull secret.
 
 Back up both the Postgres volume and the photos volume: the database refers to photo files by hash.

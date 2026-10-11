@@ -62,10 +62,10 @@ describe('auth', () => {
 
   it('cuts off a signed-in user once removed from the whitelist', async () => {
     const tomek = await login(h.app, 'tomek@gmail.com');
-    const app = await h.build({ ALLOWED_EMAILS: 'ola@gmail.com' });
-    const res = await app.inject({ method: 'GET', url: '/me', headers: tomek.headers });
+    await h.sql`delete from allowed_emails where email = 'tomek@gmail.com'`;
+    const res = await h.app.inject({ method: 'GET', url: '/me', headers: tomek.headers });
     expect(res.statusCode).toBe(403);
-    await app.close();
+    expect(res.json().error.code).toBe('not_whitelisted');
   });
 
   it('dev login is off unless enabled, and never in production', async () => {

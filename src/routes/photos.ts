@@ -5,8 +5,6 @@ import { lockHash, releaseFiles, sha256, sniffImageType } from '../photo-store.j
 import { Photo } from '../schemas.js';
 import { placeAuthor } from './places.js';
 
-const MAX_PHOTOS_PER_PLACE = 12;
-
 export function photoRoutes(app: App, ctx: Ctx) {
   const { sql } = ctx;
 
@@ -19,7 +17,7 @@ export function photoRoutes(app: App, ctx: Ctx) {
         summary: 'Upload a photo',
         description:
           'multipart/form-data with one file field: JPEG, PNG or WebP (detected from the file itself), up to ' +
-          `${Math.round(ctx.config.MAX_PHOTO_BYTES / 1024 / 1024)} MB, at most ${MAX_PHOTOS_PER_PLACE} per place. ` +
+          '`maxPhotoBytes`, at most `maxPhotosPerPlace` per place (both in /meta). ' +
           'The first photo is the cover. Resize on the phone first (about 1600 px is plenty). ' +
           'Uploading the same file to the same place again returns the existing photo (200).',
         consumes: ['multipart/form-data'],
@@ -29,7 +27,8 @@ export function photoRoutes(app: App, ctx: Ctx) {
     },
     async (req, reply) => {
       await placeAuthor(ctx, req.params.id);
-      const file = await req.file();
+      const { maxPhotoBytes, maxPhotosPerPlace } = await ctx.settings.all();
+      const file = await req.file({ limits: { fileSize: maxPhotoBytes } });
       if (!file) throw new HttpError(400, 'invalid_request', 'Expected a file');
       const data = await file.toBuffer();
       const contentType = sniffImageType(data);
@@ -44,8 +43,8 @@ export function photoRoutes(app: App, ctx: Ctx) {
         const [{ n }] = await tx<[{ n: number }]>`
           select count(*)::int as n from place_photos where place_id = ${req.params.id}
         `;
-        if (n >= MAX_PHOTOS_PER_PLACE) {
-          throw new HttpError(409, 'too_many_photos', `A place can have at most ${MAX_PHOTOS_PER_PLACE} photos`);
+        if (n >= maxPhotosPerPlace) {
+          throw new HttpError(409, 'too_many_photos', `A place can have at most ${maxPhotosPerPlace} photos`);
         }
         await lockHash(tx, hash);
         await ctx.photos.put(hash, data);

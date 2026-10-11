@@ -12,6 +12,7 @@ ENV NODE_ENV=production PORT=8080
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/dist ./dist
 COPY migrations ./migrations
+COPY admin ./admin
 COPY package.json ./
 RUN mkdir -p /data/photos && chown node:node /data/photos
 ENV PHOTO_DIR=/data/photos

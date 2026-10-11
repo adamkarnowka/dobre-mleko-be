@@ -41,12 +41,12 @@ export function createGoogleVerifier(clientIds: string[]): GoogleVerifier {
 export class Sessions {
   private readonly key: Uint8Array;
 
-  constructor(private readonly config: Pick<Config, 'JWT_SECRET' | 'SESSION_TTL_DAYS'>) {
+  constructor(config: Pick<Config, 'JWT_SECRET'>) {
     this.key = new TextEncoder().encode(config.JWT_SECRET);
   }
 
-  async issue(userId: string): Promise<{ token: string; expiresAt: string }> {
-    const exp = Math.floor(Date.now() / 1000) + this.config.SESSION_TTL_DAYS * 86400;
+  async issue(userId: string, ttlDays: number): Promise<{ token: string; expiresAt: string }> {
+    const exp = Math.floor(Date.now() / 1000) + ttlDays * 86400;
     const token = await new SignJWT({})
       .setProtectedHeader({ alg: 'HS256' })
       .setSubject(userId)
@@ -66,9 +66,12 @@ export class Sessions {
   }
 }
 
+export type Role = 'member' | 'admin';
+
 export interface CurrentUser {
   id: string;
   email: string;
+  role: Role;
 }
 
 declare module 'fastify' {
@@ -78,18 +81,38 @@ declare module 'fastify' {
 }
 
 /**
- * preHandler for authenticated routes. Checks the session token and that the account is still on the
- * whitelist, so removing an email from ALLOWED_EMAILS cuts access immediately.
+ * preHandler for authenticated routes. Checks the session token and, on every request, that the account is
+ * still on the whitelist and what its role is, so removing someone or changing their role applies immediately.
  */
-export function requireUser(deps: { sessions: Sessions; sql: Sql; allowed: Set<string> }) {
+export function requireUser(deps: { sessions: Sessions; sql: Sql }) {
   return async (req: FastifyRequest, _reply: FastifyReply) => {
     const header = req.headers.authorization;
     const token = header?.startsWith('Bearer ') ? header.slice(7) : null;
     const userId = token ? await deps.sessions.verify(token) : null;
     if (!userId) throw new HttpError(401, 'unauthorized', 'Sign in required');
-    const [user] = await deps.sql<CurrentUser[]>`select id, email from users where id = ${userId}`;
+    const [user] = await deps.sql<{ id: string; email: string; role: Role | null }[]>`
+      select u.id, u.email, a.role from users u left join allowed_emails a on a.email = u.email where u.id = ${userId}
+    `;
     if (!user) throw new HttpError(401, 'unauthorized', 'Sign in required');
-    if (!deps.allowed.has(user.email)) throw new HttpError(403, 'not_whitelisted', 'This account is not on the list');
-    req.user = user;
+    if (!user.role) throw new HttpError(403, 'not_whitelisted', 'This account is not on the list');
+    req.user = { id: user.id, email: user.email, role: user.role };
   };
+}
+
+/** preHandler for admin routes: a signed-in, whitelisted user with the admin role. */
+export function requireAdmin(requireSignedIn: ReturnType<typeof requireUser>) {
+  return async (req: FastifyRequest, reply: FastifyReply) => {
+    await requireSignedIn(req, reply);
+    if (req.user.role !== 'admin') throw new HttpError(403, 'admin_only', 'Admins only');
+  };
+}
+
+/** Makes sure the ADMIN_EMAILS from the environment are whitelisted admins. Run at startup. */
+export async function ensureAdmins(sql: Sql, emails: string[]): Promise<void> {
+  for (const email of emails) {
+    await sql`
+      insert into allowed_emails (email, role, note) values (${email}, 'admin', 'ADMIN_EMAILS')
+      on conflict (email) do update set role = 'admin', updated_at = now()
+    `;
+  }
 }

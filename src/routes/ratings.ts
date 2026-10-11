@@ -62,7 +62,7 @@ export function ratingRoutes(app: App, ctx: Ctx) {
     },
   );
 
-  // Golden star: does not change the rating; limited to STARS_PER_MONTH per person, once per place per month.
+  // Golden star: does not change the rating; limited by the starsPerMonth setting, once per place per month.
   app.post(
     '/places/:id/star',
     {
@@ -71,7 +71,7 @@ export function ratingRoutes(app: App, ctx: Ctx) {
         tags: ['Ratings'],
         summary: 'Give a golden star',
         description:
-          '"Musisz tam iść". Does not change the rating. STARS_PER_MONTH per person per calendar month, once per ' +
+          '"Musisz tam iść". Does not change the rating. `starsPerMonth` (see /meta) per person per calendar month, once per ' +
           'place per month; starring again is a no-op. 409 `no_stars_left`.',
         params: idParams,
         response: { 200: StarResult },
@@ -90,7 +90,7 @@ export function ratingRoutes(app: App, ctx: Ctx) {
         const [{ used }] = await tx<[{ used: number }]>`
         select count(*)::int as used from stars where user_id = ${req.user.id} and month = ${month}::date
       `;
-        if (used >= config.STARS_PER_MONTH) {
+        if (used >= (await ctx.settings.get('starsPerMonth'))) {
           throw new HttpError(409, 'no_stars_left', 'No golden stars left this month');
         }
         await tx`insert into stars (user_id, place_id, month) values (${req.user.id}, ${req.params.id}, ${month}::date)`;

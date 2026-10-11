@@ -2,7 +2,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { createPlace, kreska, login, pawilon, PHOTO_DIR, podPionem, setup, type TestApp } from './helpers.js';
+import { ADMIN, createPlace, kreska, login, pawilon, PHOTO_DIR, podPionem, setup, type TestApp } from './helpers.js';
 
 const h = setup();
 
@@ -151,9 +151,17 @@ describe('photos', () => {
     const fake = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>');
     expect((await upload(h.app, id, ola.headers, 'image/png', fake)).statusCode).toBe(415);
 
-    const small = await h.build({ MAX_PHOTO_BYTES: '10' });
-    expect((await upload(small, id, ola.headers, 'image/png', PNG)).statusCode).toBe(413);
-    await small.close();
+    // The limit is the maxPhotoBytes setting; 100 KB is the smallest it can be.
+    const admin = await login(h.app, ADMIN);
+    const set = await h.app.inject({
+      method: 'PUT',
+      url: '/admin/settings/maxPhotoBytes',
+      headers: admin.headers,
+      payload: { value: 100 * 1024 },
+    });
+    expect(set.statusCode).toBe(200);
+    const big = Buffer.concat([PNG, Buffer.alloc(200 * 1024)]);
+    expect((await upload(h.app, id, ola.headers, 'image/png', big)).statusCode).toBe(413);
   });
 
   it('does not serve files that no photo references', async () => {

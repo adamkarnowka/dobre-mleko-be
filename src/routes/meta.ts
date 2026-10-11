@@ -12,11 +12,18 @@ export function metaRoutes(app: App, ctx: Ctx) {
         response: { 200: Meta },
       },
     },
-    async () => ({
-      categories: [...CATEGORIES],
-      criteria: CRITERIA.map((c) => ({ ...c })),
-      starsPerMonth: ctx.config.STARS_PER_MONTH,
-      timeZone: ctx.config.TIME_ZONE,
-    }),
+    async () => {
+      const settings = await ctx.settings.all();
+      return {
+        categories: [...CATEGORIES],
+        criteria: CRITERIA.map((c) => ({ ...c })),
+        starsPerMonth: settings.starsPerMonth,
+        maxPhotoBytes: settings.maxPhotoBytes,
+        maxPhotosPerPlace: settings.maxPhotosPerPlace,
+        timeZone: ctx.config.TIME_ZONE,
+        googleWebClientId: ctx.config.GOOGLE_WEB_CLIENT_ID || null,
+        devLogin: ctx.config.DEV_LOGIN && ctx.config.NODE_ENV !== 'production',
+      };
+    },
   );
 }

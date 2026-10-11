@@ -53,8 +53,9 @@ jobs:
           API_HOST: ${{ vars.API_HOST }}
           POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
           JWT_SECRET: ${{ secrets.JWT_SECRET }}
-          ALLOWED_EMAILS: ${{ secrets.ALLOWED_EMAILS }}
+          ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
           GOOGLE_CLIENT_IDS: ${{ vars.GOOGLE_CLIENT_IDS }}
+          GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
         run: |
           # k8s.yaml starts with the Namespace, so apply creates it before the Secret below.
           {
@@ -64,8 +65,9 @@ jobs:
             kubectl create secret generic dobre-mleko --namespace dobre-mleko --dry-run=client -o yaml \
               --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
               --from-literal=JWT_SECRET="$JWT_SECRET" \
-              --from-literal=ALLOWED_EMAILS="$ALLOWED_EMAILS" \
-              --from-literal=GOOGLE_CLIENT_IDS="$GOOGLE_CLIENT_IDS"
+              --from-literal=ADMIN_EMAILS="$ADMIN_EMAILS" \
+              --from-literal=GOOGLE_CLIENT_IDS="$GOOGLE_CLIENT_IDS" \
+              --from-literal=GOOGLE_WEB_CLIENT_ID="$GOOGLE_WEB_CLIENT_ID"
           } > rendered.yaml
 
       - name: Deploy to k3s

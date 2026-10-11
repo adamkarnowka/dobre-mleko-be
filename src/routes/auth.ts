@@ -10,9 +10,8 @@ export function authRoutes(app: App, ctx: Ctx) {
 
   async function signIn(identity: GoogleIdentity) {
     if (!identity.emailVerified) throw new HttpError(403, 'email_not_verified', 'Google email is not verified');
-    if (!ctx.allowed.has(identity.email)) {
-      throw new HttpError(403, 'not_whitelisted', 'This account is not on the list');
-    }
+    const [allowed] = await sql`select 1 from allowed_emails where email = ${identity.email}`;
+    if (!allowed) throw new HttpError(403, 'not_whitelisted', 'This account is not on the list');
     const name = identity.name?.trim() || identity.email.split('@')[0]!;
     const [user] = await sql<{ id: string }[]>`
       insert into users (email, google_sub, name, avatar_url)
@@ -23,7 +22,7 @@ export function authRoutes(app: App, ctx: Ctx) {
         last_seen_at = now()
       returning id
     `;
-    const session = await ctx.sessions.issue(user!.id);
+    const session = await ctx.sessions.issue(user!.id, await ctx.settings.get('sessionTtlDays'));
     return { ...session, user: await loadProfile(ctx, user!.id) };
   }
 
@@ -34,7 +33,7 @@ export function authRoutes(app: App, ctx: Ctx) {
         tags: ['Auth'],
         summary: 'Sign in with Google',
         description:
-          'Exchanges a Google ID token from Google Sign-In for a session token valid for SESSION_TTL_DAYS. ' +
+          'Exchanges a Google ID token from Google Sign-In for a session token valid for the sessionTtlDays setting. ' +
           'The account is created on first sign-in. 403 `not_whitelisted` if the email is not on the list, ' +
           '`email_not_verified` if Google has not verified it; 401 `invalid_google_token`.',
         body: z.object({ idToken: z.string().min(1) }),

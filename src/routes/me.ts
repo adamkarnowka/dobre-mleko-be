@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { App, Ctx } from '../app.js';
+import type { Role } from '../auth.js';
 import { monthStart, type Category } from '../domain.js';
 import { notFound } from '../errors.js';
 import { queryPlaces, toPlaceSummary } from '../places-query.js';
@@ -9,14 +10,16 @@ export async function starsLeft(ctx: Ctx, userId: string, month: string): Promis
   const [{ used }] = await ctx.sql<[{ used: number }]>`
     select count(*)::int as used from stars where user_id = ${userId} and month = ${month}::date
   `;
-  return Math.max(0, ctx.config.STARS_PER_MONTH - used);
+  return Math.max(0, (await ctx.settings.get('starsPerMonth')) - used);
 }
 
 export async function loadProfile(ctx: Ctx, userId: string) {
   const [user] = await ctx.sql<
-    { id: string; email: string; name: string; avatar_url: string | null; created_at: Date }[]
+    { id: string; email: string; name: string; avatar_url: string | null; created_at: Date; role: Role | null }[]
   >`
-    select id, email, name, avatar_url, created_at from users where id = ${userId}
+    select u.id, u.email, u.name, u.avatar_url, u.created_at, a.role
+    from users u left join allowed_emails a on a.email = u.email
+    where u.id = ${userId}
   `;
   if (!user) throw notFound('User');
   const month = monthStart(ctx.now(), ctx.config.TIME_ZONE);
@@ -26,7 +29,12 @@ export async function loadProfile(ctx: Ctx, userId: string) {
     name: user.name,
     avatarUrl: user.avatar_url,
     joinedAt: user.created_at.toISOString(),
-    stars: { perMonth: ctx.config.STARS_PER_MONTH, left: await starsLeft(ctx, user.id, month), month },
+    isAdmin: user.role === 'admin',
+    stars: {
+      perMonth: await ctx.settings.get('starsPerMonth'),
+      left: await starsLeft(ctx, user.id, month),
+      month,
+    },
   };
 }
 

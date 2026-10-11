@@ -25,6 +25,7 @@ export const Profile = z
     name: z.string(),
     avatarUrl: z.string().nullable(),
     joinedAt: isoDate,
+    isAdmin: z.boolean().meta({ description: 'Can open the admin dashboard at /admin/' }),
     stars: StarsQuota,
   })
   .meta({ id: 'Profile' });
@@ -150,6 +151,55 @@ export const Meta = z
     categories: z.array(z.enum(CATEGORIES)),
     criteria: z.array(z.object({ key: criterionKey, label: z.string(), required: z.boolean() })),
     starsPerMonth: z.number().int(),
+    maxPhotoBytes: z.number().int(),
+    maxPhotosPerPlace: z.number().int(),
     timeZone: z.string(),
+    googleWebClientId: z.string().nullable().meta({ description: 'For Google sign-in on the web (admin dashboard)' }),
+    devLogin: z.boolean().meta({ description: 'Whether POST /auth/dev is available (never in production)' }),
   })
   .meta({ id: 'Meta' });
+
+const Role = z.enum(['member', 'admin']);
+
+export const AllowedEmail = z
+  .object({
+    email: z.string(),
+    role: Role,
+    note: z.string().nullable(),
+    fromEnvironment: z.boolean().meta({ description: 'Listed in ADMIN_EMAILS: cannot be removed or demoted here' }),
+    addedBy: z.object({ id: z.uuid(), name: z.string() }).nullable(),
+    createdAt: isoDate,
+    user: z
+      .object({
+        id: z.uuid(),
+        name: z.string(),
+        avatarUrl: z.string().nullable(),
+        joinedAt: isoDate,
+        lastSeenAt: isoDate,
+        places: z.number().int(),
+        ratings: z.number().int(),
+      })
+      .nullable()
+      .meta({ description: 'null until the person signs in for the first time' }),
+  })
+  .meta({ id: 'AllowedEmail' });
+
+export const AllowedEmailList = z
+  .object({ items: z.array(AllowedEmail), admins: z.number().int(), members: z.number().int() })
+  .meta({ id: 'AllowedEmailList' });
+
+export const Setting = z
+  .object({
+    key: z.string(),
+    label: z.string(),
+    description: z.string(),
+    value: z.unknown(),
+    default: z.unknown(),
+    min: z.number().nullable(),
+    max: z.number().nullable(),
+    updatedAt: isoDate.nullable(),
+    updatedBy: z.object({ id: z.uuid(), name: z.string() }).nullable(),
+  })
+  .meta({ id: 'Setting' });
+
+export const SettingList = z.object({ items: z.array(Setting) }).meta({ id: 'SettingList' });
