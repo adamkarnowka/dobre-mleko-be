@@ -1,0 +1,75 @@
+name: Build and deploy
+
+on:
+  workflow_run:
+    workflows: [CI]
+    branches: [main]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  packages: write
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}
+
+jobs:
+  deploy:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    env:
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.SHA }}
+
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build and push image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:${{ env.SHA }}
+            ${{ env.IMAGE }}:latest
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.VPS_SSH_KEY }}" > ~/.ssh/id_ed25519
+          chmod 600 ~/.ssh/id_ed25519
+          ssh-keyscan -H "${{ secrets.VPS_HOST }}" >> ~/.ssh/known_hosts
+
+      - name: Render manifests
+        env:
+          API_HOST: ${{ vars.API_HOST }}
+          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          ALLOWED_EMAILS: ${{ secrets.ALLOWED_EMAILS }}
+          GOOGLE_CLIENT_IDS: ${{ vars.GOOGLE_CLIENT_IDS }}
+        run: |
+          # k8s.yaml starts with the Namespace, so apply creates it before the Secret below.
+          {
+            sed -e "s|IMAGE_PLACEHOLDER|${IMAGE}:${SHA}|" -e "s|DEPLOY_ID_PLACEHOLDER|\"${SHA}-${GITHUB_RUN_ID}\"|" \
+                -e "s|HOST_PLACEHOLDER|${API_HOST}|g" k8s.yaml
+            echo '---'
+            kubectl create secret generic dobre-mleko --namespace dobre-mleko --dry-run=client -o yaml \
+              --from-literal=POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
+              --from-literal=JWT_SECRET="$JWT_SECRET" \
+              --from-literal=ALLOWED_EMAILS="$ALLOWED_EMAILS" \
+              --from-literal=GOOGLE_CLIENT_IDS="$GOOGLE_CLIENT_IDS"
+          } > rendered.yaml
+
+      - name: Deploy to k3s
+        run: |
+          ssh debian@${{ secrets.VPS_HOST }} \
+            'KUBECONFIG=$HOME/.kube/config kubectl apply -f - && KUBECONFIG=$HOME/.kube/config kubectl -n dobre-mleko rollout status deployment/api --timeout=180s' \
+            < rendered.yaml

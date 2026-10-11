@@ -1,0 +1,130 @@
+# Applied by .github/workflows/deploy.yml. The `dobre-mleko` secret (DB password, JWT secret,
+# whitelist, Google client IDs) is created by the workflow from repository secrets.
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: dobre-mleko
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: dobre-mleko
+spec:
+  selector: { app: postgres }
+  ports:
+    - port: 5432
+---
+apiVersion: apps/v1
+kind: StatefulSet
+metadata:
+  name: postgres
+  namespace: dobre-mleko
+spec:
+  serviceName: postgres
+  replicas: 1
+  selector:
+    matchLabels: { app: postgres }
+  template:
+    metadata:
+      labels: { app: postgres }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:16-alpine
+          env:
+            - { name: POSTGRES_USER, value: mleko }
+            - { name: POSTGRES_DB, value: mleko }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: dobre-mleko, key: POSTGRES_PASSWORD } }
+            - { name: PGDATA, value: /var/lib/postgresql/data/pgdata }
+          ports:
+            - containerPort: 5432
+          readinessProbe:
+            exec: { command: [pg_isready, -U, mleko] }
+          volumeMounts:
+            - { name: data, mountPath: /var/lib/postgresql/data }
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits: { memory: 256Mi }
+  volumeClaimTemplates:
+    - metadata:
+        name: data
+      spec:
+        accessModes: [ReadWriteOnce]
+        resources:
+          requests: { storage: 5Gi }
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api
+  namespace: dobre-mleko
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: api }
+  template:
+    metadata:
+      labels: { app: api }
+    spec:
+      containers:
+        - name: api
+          image: IMAGE_PLACEHOLDER
+          env:
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: dobre-mleko, key: POSTGRES_PASSWORD } }
+            - { name: DATABASE_URL, value: "postgres://mleko:$(POSTGRES_PASSWORD)@postgres:5432/mleko" }
+            - name: JWT_SECRET
+              valueFrom: { secretKeyRef: { name: dobre-mleko, key: JWT_SECRET } }
+            - name: ALLOWED_EMAILS
+              valueFrom: { secretKeyRef: { name: dobre-mleko, key: ALLOWED_EMAILS } }
+            - name: GOOGLE_CLIENT_IDS
+              valueFrom: { secretKeyRef: { name: dobre-mleko, key: GOOGLE_CLIENT_IDS } }
+            # Unique per workflow run, so re-running the deploy after changing secrets restarts the pod.
+            - { name: DEPLOY_ID, value: DEPLOY_ID_PLACEHOLDER }
+          ports:
+            - containerPort: 8080
+          readinessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+          livenessProbe:
+            httpGet: { path: /healthz, port: 8080 }
+            initialDelaySeconds: 10
+          resources:
+            requests: { cpu: 20m, memory: 64Mi }
+            limits: { memory: 256Mi }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api
+  namespace: dobre-mleko
+spec:
+  selector: { app: api }
+  ports:
+    - port: 80
+      targetPort: 8080
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: api
+  namespace: dobre-mleko
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+spec:
+  ingressClassName: traefik
+  tls:
+    - hosts: [HOST_PLACEHOLDER]
+      secretName: api-tls
+  rules:
+    - host: HOST_PLACEHOLDER
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: api
+                port:
+                  number: 80
