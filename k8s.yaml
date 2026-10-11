@@ -55,6 +55,17 @@ spec:
         resources:
           requests: { storage: 5Gi }
 ---
+# Photo files, named by their SHA-256 (the database stores only the hashes).
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: photos
+  namespace: dobre-mleko
+spec:
+  accessModes: [ReadWriteOnce]
+  resources:
+    requests: { storage: 10Gi }
+---
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -62,12 +73,19 @@ metadata:
   namespace: dobre-mleko
 spec:
   replicas: 1
+  # The photos volume is ReadWriteOnce: stop the old pod before starting the new one.
+  strategy: { type: Recreate }
   selector:
     matchLabels: { app: api }
   template:
     metadata:
       labels: { app: api }
     spec:
+      securityContext:
+        fsGroup: 1000 # the image runs as user node (1000)
+      volumes:
+        - name: photos
+          persistentVolumeClaim: { claimName: photos }
       containers:
         - name: api
           image: IMAGE_PLACEHOLDER
@@ -81,8 +99,11 @@ spec:
               valueFrom: { secretKeyRef: { name: dobre-mleko, key: ALLOWED_EMAILS } }
             - name: GOOGLE_CLIENT_IDS
               valueFrom: { secretKeyRef: { name: dobre-mleko, key: GOOGLE_CLIENT_IDS } }
+            - { name: PHOTO_DIR, value: /data/photos }
             # Unique per workflow run, so re-running the deploy after changing secrets restarts the pod.
             - { name: DEPLOY_ID, value: DEPLOY_ID_PLACEHOLDER }
+          volumeMounts:
+            - { name: photos, mountPath: /data/photos }
           ports:
             - containerPort: 8080
           readinessProbe:

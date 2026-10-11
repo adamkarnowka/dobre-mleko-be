@@ -30,3 +30,7 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: npm run build
+      - name: OpenAPI document builds and is valid
+        run: |
+          npm run openapi -- openapi.json
+          npx --yes @redocly/cli@2.0.8 lint openapi.json

@@ -28,7 +28,13 @@ const schema = z.object({
     .transform((s) => s === 'true' || s === '1'),
   TIME_ZONE: z.string().default('Europe/Warsaw'),
   STARS_PER_MONTH: z.coerce.number().int().positive().default(3),
-  MAX_PHOTO_BYTES: z.coerce.number().int().positive().default(8 * 1024 * 1024),
+  MAX_PHOTO_BYTES: z.coerce
+    .number()
+    .int()
+    .positive()
+    .default(8 * 1024 * 1024),
+  // Directory (a persistent volume in production) where photo files are stored.
+  PHOTO_DIR: z.string().default('./data/photos'),
   CORS_ORIGINS: csv,
 });
 

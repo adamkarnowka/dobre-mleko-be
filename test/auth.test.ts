@@ -5,7 +5,11 @@ const h = setup();
 
 describe('auth', () => {
   it('signs in a whitelisted Google account and creates the user', async () => {
-    const res = await h.app.inject({ method: 'POST', url: '/auth/google', payload: { idToken: 'google:ola@gmail.com' } });
+    const res = await h.app.inject({
+      method: 'POST',
+      url: '/auth/google',
+      payload: { idToken: 'google:ola@gmail.com' },
+    });
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.token).toBeTypeOf('string');
@@ -23,7 +27,11 @@ describe('auth', () => {
   });
 
   it('rejects accounts that are not on the whitelist', async () => {
-    const res = await h.app.inject({ method: 'POST', url: '/auth/google', payload: { idToken: 'google:obcy@gmail.com' } });
+    const res = await h.app.inject({
+      method: 'POST',
+      url: '/auth/google',
+      payload: { idToken: 'google:obcy@gmail.com' },
+    });
     expect(res.statusCode).toBe(403);
     expect(res.json().error.code).toBe('not_whitelisted');
     const [{ n }] = await h.sql<[{ n: number }]>`select count(*)::int as n from users`;
@@ -66,7 +74,9 @@ describe('auth', () => {
 
     const dev = await h.build({ DEV_LOGIN: 'true' });
     expect((await dev.inject({ method: 'POST', url: '/auth/dev', payload })).statusCode).toBe(200);
-    expect((await dev.inject({ method: 'POST', url: '/auth/dev', payload: { email: 'x@gmail.com' } })).statusCode).toBe(403);
+    expect((await dev.inject({ method: 'POST', url: '/auth/dev', payload: { email: 'x@gmail.com' } })).statusCode).toBe(
+      403,
+    );
     await dev.close();
 
     const prod = await h.build({ DEV_LOGIN: 'true', NODE_ENV: 'production' });

@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { App, Ctx } from '../app.js';
 import { HttpError, notFound } from '../errors.js';
+import { Comment, CommentList } from '../schemas.js';
 import { placeAuthor } from './places.js';
 
 interface CommentRow {
@@ -40,6 +41,10 @@ export function commentRoutes(app: App, ctx: Ctx) {
     {
       preHandler: ctx.auth,
       schema: {
+        tags: ['Comments'],
+        summary: 'Comments on a place',
+        description: 'Newest first. Each carries the author’s current overall rating of the place.',
+        response: { 200: CommentList },
         params: z.object({ id: z.uuid() }),
         querystring: z.object({
           limit: z.coerce.number().int().min(1).max(100).default(20),
@@ -62,7 +67,13 @@ export function commentRoutes(app: App, ctx: Ctx) {
     '/places/:id/comments',
     {
       preHandler: ctx.auth,
-      schema: { params: z.object({ id: z.uuid() }), body: z.object({ body: z.string().trim().min(1).max(2000) }) },
+      schema: {
+        tags: ['Comments'],
+        summary: 'Add a comment',
+        params: z.object({ id: z.uuid() }),
+        body: z.object({ body: z.string().trim().min(1).max(2000) }),
+        response: { 201: Comment },
+      },
     },
     async (req, reply) => {
       await placeAuthor(ctx, req.params.id);
@@ -77,11 +88,15 @@ export function commentRoutes(app: App, ctx: Ctx) {
 
   app.delete(
     '/comments/:id',
-    { preHandler: ctx.auth, schema: { params: z.object({ id: z.uuid() }) } },
+    {
+      preHandler: ctx.auth,
+      schema: { tags: ['Comments'], summary: 'Delete my comment', params: z.object({ id: z.uuid() }) },
+    },
     async (req, reply) => {
       const [comment] = await sql<{ user_id: string }[]>`select user_id from comments where id = ${req.params.id}`;
       if (!comment) throw notFound('Comment');
-      if (comment.user_id !== req.user.id) throw new HttpError(403, 'forbidden', 'You can only delete your own comments');
+      if (comment.user_id !== req.user.id)
+        throw new HttpError(403, 'forbidden', 'You can only delete your own comments');
       await sql`delete from comments where id = ${req.params.id}`;
       return reply.status(204).send();
     },

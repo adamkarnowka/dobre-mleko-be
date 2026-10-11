@@ -1,5 +1,5 @@
 import type { Sql } from './db.js';
-import { isOpenAt, RANKING_PRIOR_WEIGHT, type OpeningPeriod } from './domain.js';
+import { isOpenAt, RANKING_PRIOR_WEIGHT, type Category, type OpeningPeriod } from './domain.js';
 
 export type PlaceSort = 'best' | 'stars' | 'near' | 'newest';
 
@@ -21,7 +21,7 @@ export interface PlaceQuery {
 export interface PlaceRow {
   id: string;
   name: string;
-  category: string;
+  category: Category;
   price_level: number | null;
   address: string | null;
   lat: number;
@@ -36,7 +36,7 @@ export interface PlaceRow {
   stars_total: number;
   stars_month: number;
   score: number;
-  cover_photo_id: string | null;
+  cover_photo_hash: string | null;
   distance_km: number | null;
   saved: boolean;
   total: number;
@@ -73,7 +73,7 @@ export async function queryPlaces(sql: Sql, q: PlaceQuery): Promise<PlaceRow[]> 
       coalesce(st.this_month, 0) as stars_month,
       (prior.m * ${RANKING_PRIOR_WEIGHT} + coalesce(agg.avg, 0) * coalesce(agg.n, 0))
         / (${RANKING_PRIOR_WEIGHT} + coalesce(agg.n, 0))::float8 as score,
-      (select ph.id from place_photos ph where ph.place_id = p.id order by ph.created_at, ph.id limit 1) as cover_photo_id,
+      (select ph.hash from place_photos ph where ph.place_id = p.id order by ph.created_at, ph.id limit 1) as cover_photo_hash,
       ${distance} as distance_km,
       exists (select 1 from saved_places sp where sp.user_id = ${q.userId} and sp.place_id = p.id) as saved,
       (count(*) over ())::int as total
@@ -111,7 +111,7 @@ export function toPlaceSummary(row: PlaceRow, timeZone: string, now: Date) {
     openNow: row.opening_hours ? isOpenAt(row.opening_hours, now, timeZone) : null,
     rating: { average: row.rating_avg, count: row.rating_count },
     stars: { total: row.stars_total, thisMonth: row.stars_month },
-    coverPhotoUrl: row.cover_photo_id ? `/photos/${row.cover_photo_id}` : null,
+    coverPhotoUrl: row.cover_photo_hash ? `/photos/${row.cover_photo_hash}` : null,
     distanceKm: row.distance_km == null ? null : Math.round(row.distance_km * 10) / 10,
     addedBy: { id: row.added_by_id, name: row.added_by_name },
     saved: row.saved,

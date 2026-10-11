@@ -1,3 +1,6 @@
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { afterAll, beforeAll, beforeEach } from 'vitest';
 import { buildApp } from '../src/app.js';
 import type { GoogleIdentity } from '../src/auth.js';
@@ -6,6 +9,9 @@ import { createDb, migrate, type Sql } from '../src/db.js';
 import { HttpError } from '../src/errors.js';
 
 export const DATABASE_URL = process.env.TEST_DATABASE_URL ?? 'postgres://mleko:mleko@localhost:5432/mleko_test';
+
+/** One photo directory per test file, removed afterwards. */
+export const PHOTO_DIR = mkdtempSync(join(tmpdir(), 'mleko-photos-'));
 
 export const ALLOWED = ['ola@gmail.com', 'kuba@gmail.com', 'tomek@gmail.com'];
 
@@ -16,6 +22,7 @@ export function testConfig(overrides: Record<string, string> = {}): Config {
     ALLOWED_EMAILS: ALLOWED.join(','),
     GOOGLE_CLIENT_IDS: 'test-client',
     JWT_SECRET: 'test-secret-test-secret-test-secret-123',
+    PHOTO_DIR,
     ...overrides,
   });
 }
@@ -63,6 +70,7 @@ export function setup(): Harness {
   afterAll(async () => {
     await h.app?.close();
     await h.sql?.end();
+    rmSync(PHOTO_DIR, { recursive: true, force: true });
   });
 
   return h;

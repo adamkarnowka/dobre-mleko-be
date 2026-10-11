@@ -1,8 +1,14 @@
+import { constants } from 'node:fs';
+import { access, mkdir } from 'node:fs/promises';
 import { buildApp } from './app.js';
 import { loadConfig } from './config.js';
 import { createDb, migrate } from './db.js';
 
 const config = loadConfig();
+
+// Fail at startup, not on the first upload, if the photo volume is missing or read-only.
+await mkdir(config.PHOTO_DIR, { recursive: true });
+await access(config.PHOTO_DIR, constants.W_OK);
 const sql = createDb(config.DATABASE_URL);
 
 const applied = await migrate(sql);

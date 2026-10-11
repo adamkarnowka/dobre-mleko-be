@@ -106,7 +106,9 @@ describe('places', () => {
     expect(ok.json()).toMatchObject({ name: 'Pawilon Nocny', priceLevel: 3, tags: ['Jazz'], location: { lat: 52.23 } });
 
     expect((await h.app.inject({ method: 'DELETE', url: `/places/${id}`, headers: ola.headers })).statusCode).toBe(403);
-    expect((await h.app.inject({ method: 'DELETE', url: `/places/${id}`, headers: kuba.headers })).statusCode).toBe(204);
+    expect((await h.app.inject({ method: 'DELETE', url: `/places/${id}`, headers: kuba.headers })).statusCode).toBe(
+      204,
+    );
     expect((await h.app.inject({ method: 'GET', url: `/places/${id}`, headers: kuba.headers })).statusCode).toBe(404);
   });
 

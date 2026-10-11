@@ -14,11 +14,15 @@
     "migrate": "tsx src/migrate-cli.ts",
     "migrate:prod": "node dist/migrate-cli.js",
     "typecheck": "tsc --noEmit",
-    "test": "vitest run"
+    "test": "vitest run",
+    "openapi": "tsx src/openapi.ts",
+    "format": "prettier --write src test",
+    "format:check": "prettier --check src test"
   },
   "dependencies": {
     "@fastify/cors": "^11.3.1",
     "@fastify/multipart": "^10.1.3",
+    "@fastify/swagger": "^9.9.2",
     "fastify": "^5.12.5",
     "fastify-type-provider-zod": "^7.0.0",
     "google-auth-library": "^11.2.0",
@@ -28,6 +32,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.6.5",
+    "prettier": "^3.8.1",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",
     "vitest": "^5.0.3"

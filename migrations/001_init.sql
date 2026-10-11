@@ -30,15 +30,19 @@ create table places (
 create index places_category_idx on places (category);
 create index places_name_idx on places (lower(name));
 
+-- The image files live on a volume, named by their SHA-256 (see src/photo-store.ts); only the hash is stored here.
 create table place_photos (
   id            uuid primary key default gen_random_uuid(),
   place_id      uuid not null references places (id) on delete cascade,
   uploaded_by   uuid not null references users (id),
+  hash          char(64) not null check (hash ~ '^[0-9a-f]{64}$'),
   content_type  text not null,
-  data          bytea not null,
-  created_at    timestamptz not null default now()
+  size_bytes    integer not null,
+  created_at    timestamptz not null default now(),
+  unique (place_id, hash)
 );
 create index place_photos_place_idx on place_photos (place_id, created_at);
+create index place_photos_hash_idx on place_photos (hash);
 
 -- One rating per person per place. Criteria are 1–5; service and value are optional ("nie dotyczy").
 -- Overall is the average of the criteria that were given.

@@ -16,7 +16,10 @@ describe('ratings', () => {
       payload: { vibe: 5, offer: 4, service: 4, value: null },
     });
     expect(res.statusCode).toBe(200);
-    expect(res.json().myRating).toMatchObject({ scores: { vibe: 5, offer: 4, service: 4, value: null }, overall: 4.33 });
+    expect(res.json().myRating).toMatchObject({
+      scores: { vibe: 5, offer: 4, service: 4, value: null },
+      overall: 4.33,
+    });
     expect(res.json().rating).toEqual({ average: 4.33, count: 1 });
   });
 
@@ -66,7 +69,12 @@ describe('ratings', () => {
     const b = await createPlace(h.app, ola.headers, podPionem);
     const c = await createPlace(h.app, ola.headers, kreska);
     const rate = (who: typeof ola, id: string, v: number) =>
-      h.app.inject({ method: 'PUT', url: `/places/${id}/rating`, headers: who.headers, payload: { vibe: v, offer: v } });
+      h.app.inject({
+        method: 'PUT',
+        url: `/places/${id}/rating`,
+        headers: who.headers,
+        payload: { vibe: v, offer: v },
+      });
 
     // a: three 5s; b: a single 5; c: three 2s. One lone 5 must not beat three of them.
     for (const who of [ola, kuba, tomek]) {
@@ -105,7 +113,12 @@ describe('golden stars', () => {
   it('does not change the rating and renews next month', async () => {
     const ola = await login(h.app, 'ola@gmail.com');
     const id = await createPlace(h.app, ola.headers, pawilon);
-    await h.app.inject({ method: 'PUT', url: `/places/${id}/rating`, headers: ola.headers, payload: { vibe: 4, offer: 4 } });
+    await h.app.inject({
+      method: 'PUT',
+      url: `/places/${id}/rating`,
+      headers: ola.headers,
+      payload: { vibe: 4, offer: 4 },
+    });
     await h.app.inject({ method: 'POST', url: `/places/${id}/star`, headers: ola.headers });
 
     let place = (await h.app.inject({ method: 'GET', url: `/places/${id}`, headers: ola.headers })).json();
@@ -120,14 +133,18 @@ describe('golden stars', () => {
     expect(place).toMatchObject({ stars: { total: 1, thisMonth: 0 }, myStar: { givenThisMonth: false, left: 3 } });
 
     // A new star for the same place in the new month.
-    expect((await h.app.inject({ method: 'POST', url: `/places/${id}/star`, headers: ola.headers })).json().left).toBe(2);
+    expect((await h.app.inject({ method: 'POST', url: `/places/${id}/star`, headers: ola.headers })).json().left).toBe(
+      2,
+    );
   });
 
   it('cannot be overrun by concurrent requests', async () => {
     const ola = await login(h.app, 'ola@gmail.com');
     const ids = [];
     for (let i = 0; i < 6; i++) ids.push(await createPlace(h.app, ola.headers, { ...pawilon, name: `Miejsce ${i}` }));
-    await Promise.all(ids.map((id) => h.app.inject({ method: 'POST', url: `/places/${id}/star`, headers: ola.headers })));
+    await Promise.all(
+      ids.map((id) => h.app.inject({ method: 'POST', url: `/places/${id}/star`, headers: ola.headers })),
+    );
     const [{ n }] = await h.sql<[{ n: number }]>`select count(*)::int as n from stars`;
     expect(n).toBe(3);
   });
