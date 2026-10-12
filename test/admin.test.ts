@@ -191,22 +191,8 @@ describe('settings', () => {
   });
 });
 
-describe('dashboard', () => {
-  it('is served with a strict content security policy', async () => {
-    const res = await call('GET', '/admin/');
-    expect(res.statusCode).toBe(200);
-    expect(res.headers['content-type']).toContain('text/html');
-    expect(res.headers['content-security-policy']).toContain(
-      "script-src 'self' https://accounts.google.com/gsi/client",
-    );
-    expect(res.headers['content-security-policy']).toContain("frame-ancestors 'none'");
-    expect((await call('GET', '/admin/app.js')).statusCode).toBe(200);
-    const redirect = await call('GET', '/admin');
-    expect(redirect.statusCode).toBe(302);
-    expect(redirect.headers.location).toBe('/admin/');
-  });
-
-  it('exposes what the sign-in page needs', async () => {
+describe('sign-in metadata', () => {
+  it('exposes what the web sign-in page needs', async () => {
     const meta = (await call('GET', '/meta')).json();
     expect(meta).toMatchObject({ google_web_client_id: null, dev_login: false, max_photos_per_rating: 6 });
   });

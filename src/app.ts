@@ -1,7 +1,5 @@
-import { fileURLToPath } from 'node:url';
 import cors from '@fastify/cors';
 import multipart from '@fastify/multipart';
-import fastifyStatic from '@fastify/static';
 import swagger from '@fastify/swagger';
 import Fastify, {
   type FastifyBaseLogger,
@@ -173,35 +171,5 @@ export async function buildApp(deps: AppDeps) {
     routes(app, ctx);
   }
 
-  // Admin dashboard: static files, no build step. Strict CSP: only our own scripts plus Google sign-in.
-  await app.register(fastifyStatic, {
-    root: adminDir,
-    prefix: '/admin/',
-    index: 'index.html',
-    setHeaders: (res) => {
-      res.header(
-        'content-security-policy',
-        [
-          "default-src 'self'",
-          "script-src 'self' https://accounts.google.com/gsi/client",
-          "style-src 'self' https://accounts.google.com/gsi/style https://fonts.googleapis.com",
-          'font-src https://fonts.gstatic.com',
-          "img-src 'self' https: data:",
-          'frame-src https://accounts.google.com/gsi/',
-          "connect-src 'self' https://accounts.google.com/gsi/",
-          "frame-ancestors 'none'",
-          "base-uri 'none'",
-        ].join('; '),
-      );
-      res.header('referrer-policy', 'no-referrer');
-      res.header('x-content-type-options', 'nosniff');
-      // Lets the Google sign-in popup report back.
-      res.header('cross-origin-opener-policy', 'same-origin-allow-popups');
-    },
-  });
-  app.get('/admin', { schema: { hide: true } }, (_req, reply) => reply.redirect('/admin/'));
-
   return app;
 }
-
-const adminDir = fileURLToPath(new URL('../admin/', import.meta.url));

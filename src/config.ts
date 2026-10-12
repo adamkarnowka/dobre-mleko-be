@@ -15,11 +15,11 @@ const schema = z.object({
   PORT: z.coerce.number().int().default(8080),
   DATABASE_URL: z.string().min(1),
   // Admins that always exist, so the dashboard can never lock everyone out. Everyone else is whitelisted in the
-  // database from the admin dashboard.
+  // database from the admin dashboard (in dobre-mleko-web).
   ADMIN_EMAILS: csv,
   // OAuth client IDs (iOS, Android) whose Google ID tokens we accept.
   GOOGLE_CLIENT_IDS: csv,
-  // OAuth client ID of type "Web application", used by the admin dashboard's Google sign-in button.
+  // OAuth client ID of type "Web application", used by the web app's and admin dashboard's Google sign-in button.
   GOOGLE_WEB_CLIENT_ID: z.string().trim().default(''),
   // Secret for signing our own session tokens. At least 32 characters.
   JWT_SECRET: z.string().min(32),

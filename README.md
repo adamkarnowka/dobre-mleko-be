@@ -1,7 +1,8 @@
 # dobre-mleko-be
 
 Backend for **Dobre Mleko**: place ratings like Google Maps, but only from friends. Only Google accounts on a
-whitelist can sign in; admins manage the whitelist and settings in a dashboard at `/admin/`.
+whitelist can sign in; admins manage the whitelist and settings in the admin dashboard of the web app
+([dobre-mleko-web](https://github.com/mwalczak/dobre-mleko-web), which also hosts the web version of the app).
 
 Node 22 · TypeScript · Fastify · Postgres 16 with PostGIS, `pg_trgm` and `unaccent` · photos on a volume.
 
@@ -37,8 +38,8 @@ curl -s -X POST localhost:8080/auth/dev -H 'content-type: application/json' -d '
 curl -s 'localhost:8080/places?sort=best' -H "authorization: Bearer <token>"
 ```
 
-The admin dashboard is at http://localhost:8080/admin/; with `DEV_LOGIN` it also offers an e-mail sign-in
-(use `marta@example.com`, the seeded admin).
+For the web app and the admin dashboard, run [dobre-mleko-web](https://github.com/mwalczak/dobre-mleko-web) against this API (`npm run dev` there
+proxies to `localhost:8080`); with `DEV_LOGIN` they offer an e-mail sign-in (`marta@example.com` is the seeded admin).
 
 ### Fixtures
 
@@ -87,7 +88,7 @@ Environment variables (see `.env.example`):
 | `JWT_SECRET` | – | At least 32 characters; signs session tokens and photo URLs |
 | `ADMIN_EMAILS` | – | Comma-separated admins. Always whitelisted as admins (re-applied at every start) and cannot be removed or demoted in the dashboard, so nobody can lock everyone out |
 | `GOOGLE_CLIENT_IDS` | – | OAuth client IDs of the mobile apps whose Google ID tokens are accepted |
-| `GOOGLE_WEB_CLIENT_ID` | – | OAuth client ID of type "Web application" for the dashboard's sign-in button (authorised JavaScript origin: `https://<API_HOST>`) |
+| `GOOGLE_WEB_CLIENT_ID` | – | OAuth client ID of type "Web application" for the web app's and admin dashboard's sign-in button (authorised JavaScript origin: `https://<WEB_HOST>`, the web app's domain) |
 | `PHOTO_DIR` | `./data/photos` | Where photo files are stored (a volume in production) |
 | `TIME_ZONE` | `Europe/Warsaw` | Month boundaries for gold stars, weeks in stats, "open now" |
 | `CORS_ORIGINS` | none | Only needed for a browser client on another origin |
@@ -222,22 +223,19 @@ Migrations in `migrations/` run in order at startup (an advisory lock makes conc
 Distances use `ST_DWithin`, `ST_Distance` and the `<->` nearest-neighbour operator on `geom::geography`; the map
 uses `geom && ST_MakeEnvelope(...)`. Tests check that these and the text search use their indexes.
 
-### Admin dashboard
+### Web clients
 
-`/admin/` is a static page (plain HTML, CSS and JS in `admin/`, no build step) in the app's design system, served
-by the API with a strict Content-Security-Policy. It signs in with Google (`GOOGLE_WEB_CLIENT_ID`), or by e-mail
-when `DEV_LOGIN` is on, and offers:
-
-- **Ludzie:** add people (e-mail, role, note), change roles and notes, remove people; shows who has signed in,
-  when they were last active and how many places and ratings they have.
-- **Ustawienia:** the runtime settings with their defaults and ranges, who changed them and when, and a reset.
+This repository is the API only. The web app and the admin dashboard live in [dobre-mleko-web](https://github.com/mwalczak/dobre-mleko-web): they are served
+from their own domain, and nginx there proxies `/api/*` and `/files/*` to this API's in-cluster service, so the
+browser sees one origin (no CORS) and signed photo URLs work unchanged. The dashboard uses the `/admin/*` endpoints
+and `GET /stats/network`; sign-in uses `GET /meta` (`google_web_client_id`, `dev_login`).
 
 ### Project layout
 
 ```
 src/
   server.ts          startup: config, migrations, admins, hourly cleanup of unattached uploads
-  app.ts             Fastify app, error format, OpenAPI, dashboard
+  app.ts             Fastify app, error format, OpenAPI
   routes/            one file per area (auth, me, places, ratings, comments, photos, stats, meta, admin)
   places-query.ts    the shared search and ranking query
   rating-logic.ts    photos-per-rating rule and gold star quota
@@ -246,7 +244,6 @@ src/
   settings.ts        runtime settings; config.ts environment variables
   seed.ts            development fixtures; openapi.ts writes the OpenAPI document
 migrations/          SQL migrations
-admin/               the dashboard
 test/                API tests (vitest, real Postgres)
 ```
 
@@ -276,7 +273,7 @@ Repository secrets: `VPS_HOST`, `VPS_SSH_KEY`, `POSTGRES_PASSWORD` (letters and 
 `openssl rand -hex 24`), `JWT_SECRET` (`openssl rand -base64 48`), `ADMIN_EMAILS`.
 Repository variables: `API_HOST` (the API's domain), `GOOGLE_CLIENT_IDS`, `GOOGLE_WEB_CLIENT_ID`.
 
-The whitelist and settings are managed at `https://<API_HOST>/admin/`. Changing `ADMIN_EMAILS` needs the secret
+The whitelist and settings are managed at `https://<WEB_HOST>/admin/` (see dobre-mleko-web). Changing `ADMIN_EMAILS` needs the secret
 edited and the "Build and deploy" workflow re-run. After the first run, make the GHCR package public or add an
 image pull secret. Back up both the Postgres volume and the photo volume: the database refers to files by hash.
 

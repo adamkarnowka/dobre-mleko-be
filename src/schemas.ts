@@ -40,7 +40,7 @@ export const GoldStarQuota = z
 
 export const Me = Profile.extend({
   email: z.string(),
-  is_admin: z.boolean().meta({ description: 'Can open the admin dashboard at /admin/' }),
+  is_admin: z.boolean().meta({ description: 'Can use the /admin endpoints (the admin dashboard of the web app)' }),
   has_profile: z.boolean().meta({ description: 'false until POST /me/profile; the app shows onboarding' }),
   gold_stars: GoldStarQuota,
 }).meta({ id: 'Me', description: 'The signed-in member.' });
@@ -215,7 +215,10 @@ export const Meta = z
     max_photo_bytes: z.number().int(),
     max_photos_per_rating: z.number().int(),
     time_zone: z.string(),
-    google_web_client_id: z.string().nullable().meta({ description: 'For Google sign-in on the web (dashboard)' }),
+    google_web_client_id: z
+      .string()
+      .nullable()
+      .meta({ description: 'For Google sign-in on the web (web app and admin dashboard)' }),
     dev_login: z.boolean().meta({ description: 'Whether POST /auth/dev is available (never in production)' }),
   })
   .meta({ id: 'Meta' });
