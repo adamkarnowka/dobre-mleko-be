@@ -294,11 +294,13 @@ export function placeRoutes(app: App, ctx: Ctx) {
         }
         const [created] = await tx<{ id: string }[]>`
           insert into places (name, category, status, price_level, address, lat, lng, description, tags,
-                              opening_hours, google_place_id, added_by, card_layout, photo_filter, filter_intensity)
+                              opening_hours, google_place_id, added_by, card_layout, photo_filter, filter_intensity,
+                              card_color)
           values (${b.name}, ${b.category_id}, ${b.status}, ${b.price_level}, ${b.address}, ${b.location.lat},
                   ${b.location.lng}, ${b.description}, ${b.tags}, ${b.opening_hours ? tx.json(b.opening_hours) : null},
                   ${b.google_place_id}, ${req.user.id}, ${b.card_style.layout ?? 'auto'},
-                  ${b.card_style.photo_filter ?? 'none'}, ${b.card_style.filter_intensity ?? 100})
+                  ${b.card_style.photo_filter ?? 'none'}, ${b.card_style.filter_intensity ?? 100},
+                  ${b.card_style.color ?? null})
           returning id
         `;
         const placeId = created!.id;
@@ -364,6 +366,7 @@ export function placeRoutes(app: App, ctx: Ctx) {
       if (b.card_style?.layout !== undefined) set.card_layout = b.card_style.layout;
       if (b.card_style?.photo_filter !== undefined) set.photo_filter = b.card_style.photo_filter;
       if (b.card_style?.filter_intensity !== undefined) set.filter_intensity = b.card_style.filter_intensity;
+      if (b.card_style?.color !== undefined) set.card_color = b.card_style.color;
       if (Object.keys(set).length) {
         await sql`update places set ${sql(set)}, updated_at = now() where id = ${req.params.id}`;
       }
