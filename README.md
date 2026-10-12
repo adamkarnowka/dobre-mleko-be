@@ -150,7 +150,7 @@ or suspending them applies to existing sessions immediately. Their content stays
 
 ### Places and search
 
-A place has a name, category (`food coffee bar club kids culture nature sport shopping other`), location, optional
+A place has a name, category (`food coffee bar club kids culture nature sport shopping hotel other`), location, optional
 address, description (up to 500 characters), price level 1–4, tags, opening hours and a status (`active`,
 `temporarily_closed`, `closed`). `POST /places` adds it **together with the author's rating and photos** (and
 optionally a gold star) in one transaction. The author or an admin edits or deletes it.

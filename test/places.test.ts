@@ -52,6 +52,21 @@ describe('adding places', () => {
     expect(place.cover_photo.id).toBe(photo);
   });
 
+  it('accepts every category, hotels included', async () => {
+    const kuba = await login(h.app, 'kuba@gmail.com');
+    await createPlace(h.app, kuba, {
+      name: 'Hotel Pod Wieżą',
+      category_id: 'hotel',
+      location: { lat: 50.0955, lng: 18.5419 },
+    });
+    const res = await h.app.inject({ method: 'GET', url: '/places?categories=hotel', headers: kuba.headers });
+    expect(res.json().items.map((p: Item & { category_id: string }) => [p.name, p.category_id])).toEqual([
+      ['Hotel Pod Wieżą', 'hotel'],
+    ]);
+    const meta = await h.app.inject({ method: 'GET', url: '/meta' });
+    expect(meta.json().categories).toContain('hotel');
+  });
+
   it('requires a rating and at least one of my own unattached photos', async () => {
     const kuba = await login(h.app, 'kuba@gmail.com');
     const ola = await login(h.app, 'ola@gmail.com');

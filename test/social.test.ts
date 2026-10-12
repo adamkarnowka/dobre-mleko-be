@@ -316,6 +316,6 @@ describe('stats', () => {
       dev_login: false,
       criteria: [{ key: 'vibe', required: true }, {}, {}, {}],
     });
-    expect(meta.categories).toHaveLength(10);
+    expect(meta.categories).toHaveLength(11);
   });
 });

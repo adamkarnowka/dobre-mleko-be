@@ -120,6 +120,12 @@ const NAMES: Record<Category, { prefix: string[]; suffix: string[]; tags: string
     tags: ['Lokalne produkty', 'Vintage', 'Książki', 'Warzywa', 'Weekendy'],
     about: ['Warzywa prosto od rolników.', 'Można przepaść na godzinę.', 'Ceny uczciwe, obsługa zna się na rzeczy.'],
   },
+  hotel: {
+    prefix: ['Hotel', 'Pensjonat', 'Hostel', 'Apartamenty', 'Willa'],
+    suffix: ['Pod Wieżą', 'Stara Kamienica', 'Przy Parku', 'Na Wzgórzu', 'Śródmieście', 'Cicha Noc'],
+    tags: ['Śniadania', 'Parking', 'Z psem', 'Widok', 'Basen', 'Blisko centrum'],
+    about: ['Ciche pokoje od podwórza i świetne śniadania.', 'Dobra baza na weekend.', 'Obsługa jak w rodzinie.'],
+  },
   other: {
     prefix: ['Pracownia', 'Warsztat', 'Studio', 'Punkt'],
     suffix: ['Ceramiki', 'Rowerowy', 'Tatuażu', 'Pod Schodami', 'Na Strychu'],
@@ -196,6 +202,7 @@ const HOURS: Record<Category, [string, string] | null> = {
   nature: null,
   sport: ['07:00', '22:00'],
   shopping: ['09:00', '18:00'],
+  hotel: null,
   other: ['10:00', '18:00'],
 };
 
