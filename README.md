@@ -3,7 +3,7 @@
 Backend for **Dobre Mleko**: place ratings like Google Maps, but only from friends.
 Only Google accounts on a whitelist can sign in; admins manage the whitelist and settings in a dashboard at `/admin/`.
 
-Node 22 · TypeScript · Fastify · Postgres 16.
+Node 22 · TypeScript · Fastify · Postgres 16 with PostGIS.
 
 **API docs:** https://mwalczak.github.io/dobre-mleko-be/ (OpenAPI: [`openapi.json`](https://mwalczak.github.io/dobre-mleko-be/openapi.json)).
 
@@ -11,6 +11,9 @@ Node 22 · TypeScript · Fastify · Postgres 16.
 
 ```sh
 cp .env.example .env     # set DATABASE_URL, ADMIN_EMAILS, ...
+# Postgres 16 with PostGIS, e.g.:
+#   docker run -d -p 5432:5432 -e POSTGRES_USER=mleko -e POSTGRES_PASSWORD=mleko postgis/postgis:16-3.5-alpine
+# or on Debian/Ubuntu: apt install postgresql-16-postgis-3
 createdb mleko
 npm install
 npm run dev
@@ -53,7 +56,7 @@ generated from the route schemas in `src/` (responses are checked against the sa
 
 - **Sign-in:** the app signs in with Google and sends the Google ID token to `POST /auth/google`. The server
   checks the token, the whitelist, and returns a session token. Send it as `Authorization: Bearer <token>`.
-- **Places:** `GET /places` (search, category and distance filters, sort by best / stars / near / newest),
+- **Places:** `GET /places` (search, category, distance and map-viewport (`bbox`) filters, sort by best / stars / near / newest),
   `POST`, `GET`, `PATCH`, `DELETE /places/:id`, `PUT|DELETE /places/:id/saved`.
 - **Ratings:** `PUT|DELETE /places/:id/rating` with `vibe` and `offer` (required) and `service`, `value`
   (optional, "nie dotyczy"), each 1–5. Ranking uses a Bayesian average (prior weight of 3 ratings).
@@ -92,6 +95,13 @@ Content-Security-Policy. It signs in with Google (needs `GOOGLE_WEB_CLIENT_ID`) 
   when they were last active and how many places and ratings they have.
 - **Ustawienia:** the settings above with their defaults and ranges, who changed them and when, and a reset.
 
+### Location queries
+
+Places keep `lat`/`lng`; a generated PostGIS column `geom` (`geometry(Point, 4326)`) follows them, with two
+GiST indexes: on `geom` for map viewports (`bbox`, `geom && ST_MakeEnvelope(...)`) and on `geom::geography`
+for distances in metres (`maxDistanceKm` via `ST_DWithin`, `sort=near` via the `<->` nearest-neighbour operator,
+`distanceKm` via `ST_Distance`).
+
 ### Photos
 
 Photo files are stored in `PHOTO_DIR` under their SHA-256 (`<dir>/6b/6b7f…`); the database keeps only the hash,
@@ -103,7 +113,7 @@ components need no headers; only hashes that belong to a photo are served.
 
 CI (`ci.yml`) runs on every push and pull request. When it passes on `main`, `deploy.yml` builds the image,
 pushes it to GHCR and applies `k8s.yaml` on the k3s server over SSH (same setup as `ip`). That creates the
-`dobre-mleko` namespace with a Postgres StatefulSet (5 Gi volume), a 10 Gi volume for photos, the API and a
+`dobre-mleko` namespace with a Postgres + PostGIS StatefulSet (5 Gi volume), a 10 Gi volume for photos, the API and a
 Traefik ingress with a cert-manager certificate. The API is deployed with the `Recreate` strategy because the
 photo volume can be mounted by one pod at a time, so a deploy has a few seconds of downtime.
 

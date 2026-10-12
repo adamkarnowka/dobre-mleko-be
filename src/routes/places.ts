@@ -49,8 +49,31 @@ const listQuery = z
     lat: z.coerce.number().min(-90).max(90).optional(),
     lng: z.coerce.number().min(-180).max(180).optional(),
     maxDistanceKm: z.coerce.number().positive().optional(),
+    bbox: z
+      .string()
+      .optional()
+      .meta({ description: 'Map viewport: minLng,minLat,maxLng,maxLat', example: '20.9,52.15,21.15,52.3' })
+      .transform((s, c) => {
+        if (s == null) return undefined;
+        const n = s.split(',').map(Number);
+        const [minLng, minLat, maxLng, maxLat] = n as [number, number, number, number];
+        const ok =
+          n.length === 4 &&
+          n.every(Number.isFinite) &&
+          minLng >= -180 &&
+          maxLng <= 180 &&
+          minLat >= -90 &&
+          maxLat <= 90 &&
+          minLng < maxLng &&
+          minLat < maxLat;
+        if (!ok) {
+          c.addIssue({ code: 'custom', message: 'bbox must be minLng,minLat,maxLng,maxLat' });
+          return z.NEVER;
+        }
+        return { minLng, minLat, maxLng, maxLat };
+      }),
     sort: z.enum(['best', 'stars', 'near', 'newest']).default('best'),
-    limit: z.coerce.number().int().min(1).max(100).default(20),
+    limit: z.coerce.number().int().min(1).max(500).default(20),
     offset: z.coerce.number().int().min(0).default(0),
   })
   .refine((q) => (q.lat == null) === (q.lng == null), { message: 'lat and lng go together' })
@@ -141,13 +164,14 @@ export function placeRoutes(app: App, ctx: Ctx) {
         summary: 'Discover places',
         description:
           'Search (`q` matches name, address and tags), filter and sort. `sort=best` ranks by rating pulled towards ' +
-          'the network average with the weight of 3 ratings; `stars` by golden stars this month; `near` by distance.',
+          'the network average with the weight of 3 ratings; `stars` by golden stars this month; `near` by distance. ' +
+          'For the map, pass `bbox` (the visible area) with a `limit` of up to 500.',
         querystring: listQuery,
         response: { 200: PlaceList },
       },
     },
     async (req) => {
-      const { q, category, lat, lng, maxDistanceKm, sort, limit, offset } = req.query;
+      const { q, category, lat, lng, maxDistanceKm, bbox, sort, limit, offset } = req.query;
       const now = ctx.now();
       const rows = await queryPlaces(sql, {
         userId: req.user.id,
@@ -156,6 +180,7 @@ export function placeRoutes(app: App, ctx: Ctx) {
         categories: category,
         near: lat != null && lng != null ? { lat, lng } : undefined,
         maxDistanceKm,
+        bbox,
         sort,
         limit,
         offset,

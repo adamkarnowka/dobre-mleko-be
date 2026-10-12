@@ -77,6 +77,41 @@ describe('places', () => {
     expect(near.items[1]!.distanceKm).toBeCloseTo(0.5, 1);
   });
 
+  it('returns the places inside a map viewport', async () => {
+    const kuba = await login(h.app, 'kuba@gmail.com');
+    await createPlace(h.app, kuba.headers, pawilon);
+    await createPlace(h.app, kuba.headers, podPionem);
+    await createPlace(h.app, kuba.headers, kreska); // Kraków
+
+    const view = async (bbox: string) =>
+      h.app.inject({ method: 'GET', url: `/places?bbox=${bbox}&limit=500`, headers: kuba.headers });
+
+    const warsaw = (await view('20.85,52.1,21.25,52.37')).json();
+    expect(warsaw.items.map((p: { name: string }) => p.name).sort()).toEqual(['Bar Pod Pionem', 'Pawilon Nocny']);
+    expect((await view('14.1,49.0,24.2,54.9')).json().total).toBe(3); // all of Poland
+    expect((await view('0,0,1,1')).json().total).toBe(0);
+
+    expect((await view('21.2,52.1,20.8,52.3')).statusCode).toBe(400); // min > max
+    expect((await view('1,2,3')).statusCode).toBe(400);
+  });
+
+  it('uses the spatial indexes', async () => {
+    // With sequential scans off, the planner must find an index for each kind of spatial query.
+    const plan = async (where: string, order = '') =>
+      (
+        await h.sql.begin(async (tx) => {
+          await tx`set local enable_seqscan = off`;
+          return tx.unsafe(`explain select id from places where ${where} ${order}`);
+        })
+      )
+        .map((r) => r['QUERY PLAN'] as string)
+        .join('\n');
+    const here = 'ST_SetSRID(ST_MakePoint(21.01, 52.23), 4326)::geography';
+    expect(await plan(`ST_DWithin(geom::geography, ${here}, 2000)`)).toContain('places_geog_idx');
+    expect(await plan('geom && ST_MakeEnvelope(20.9, 52.1, 21.1, 52.3, 4326)')).toContain('places_geom_idx');
+    expect(await plan('true', `order by geom::geography <-> ${here} limit 5`)).toContain('places_geog_idx');
+  });
+
   it('needs coordinates to sort by distance', async () => {
     const kuba = await login(h.app, 'kuba@gmail.com');
     const res = await h.app.inject({ method: 'GET', url: '/places?sort=near', headers: kuba.headers });

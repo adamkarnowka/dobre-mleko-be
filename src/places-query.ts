@@ -13,6 +13,8 @@ export interface PlaceQuery {
   categories?: string[];
   near?: { lat: number; lng: number };
   maxDistanceKm?: number;
+  /** Map viewport: only places inside this lng/lat rectangle. */
+  bbox?: { minLng: number; minLat: number; maxLng: number; maxLat: number };
   sort?: PlaceSort;
   limit?: number;
   offset?: number;
@@ -45,13 +47,16 @@ export interface PlaceRow {
 /** Place cards with their aggregates: the shared query behind discover, saved places, top lists. */
 export async function queryPlaces(sql: Sql, q: PlaceQuery): Promise<PlaceRow[]> {
   const near = q.near;
-  const distance = near ? sql`distance_km(${near.lat}, ${near.lng}, p.lat, p.lng)` : sql`null::float8`;
+  // Distances use PostGIS geography (metres on the sphere) and the GiST index on geom::geography.
+  const here = near ? sql`ST_SetSRID(ST_MakePoint(${near.lng}::float8, ${near.lat}::float8), 4326)::geography` : null;
+  const distance = here ? sql`ST_Distance(p.geom::geography, ${here}) / 1000` : sql`null::float8`;
+  const box = q.bbox;
   const search = q.q?.trim() ? `%${q.q.trim().replace(/[\\%_]/g, (c) => '\\' + c)}%` : null;
 
   const order = {
     best: sql`score desc, rating_count desc, p.name`,
     stars: sql`stars_month desc, stars_total desc, score desc, p.name`,
-    near: near ? sql`distance_km asc, p.name` : sql`score desc, p.name`,
+    near: here ? sql`p.geom::geography <-> ${here}, p.name` : sql`score desc, p.name`,
     newest: sql`p.created_at desc`,
   }[q.sort ?? 'best'];
 
@@ -93,7 +98,8 @@ export async function queryPlaces(sql: Sql, q: PlaceQuery): Promise<PlaceRow[]> 
                      or exists (select 1 from unnest(p.tags) t where t ilike ${search}))`
           : sql``
       }
-      ${near && q.maxDistanceKm != null ? sql`and ${distance} <= ${q.maxDistanceKm}` : sql``}
+      ${here && q.maxDistanceKm != null ? sql`and ST_DWithin(p.geom::geography, ${here}, ${q.maxDistanceKm * 1000})` : sql``}
+      ${box ? sql`and p.geom && ST_MakeEnvelope(${box.minLng}, ${box.minLat}, ${box.maxLng}, ${box.maxLat}, 4326)` : sql``}
     order by ${order}
     limit ${q.limit ?? 20} offset ${q.offset ?? 0}
   `;
