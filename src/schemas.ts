@@ -62,6 +62,40 @@ export const PhotoFile = z
 
 export const Location = z.object({ lat: z.number(), lng: z.number() });
 
+export const CARD_LAYOUTS = ['auto', 'a', 'b', 'c'] as const;
+export const PHOTO_FILTERS = ['none', 'duotone', 'halftone', 'engraving', 'riso'] as const;
+/** The app's card colours (design tokens `cardColor` in the app repo). */
+export const CARD_COLORS = [
+  'red',
+  'blue',
+  'yellow',
+  'ink',
+  'orange',
+  'pink',
+  'green',
+  'teal',
+  'sky',
+  'navy',
+  'violet',
+  'ochre',
+  'brick',
+  'olive',
+  'sand',
+  'stone',
+] as const;
+
+export const CardStyle = z
+  .object({
+    layout: z.enum(CARD_LAYOUTS).meta({
+      description:
+        'List card: a = photo full width, b = poster without photo, c = photo in a circle; auto = app rotates',
+    }),
+    photo_filter: z.enum(PHOTO_FILTERS).meta({ description: 'Filter on the list card and the main photo' }),
+    filter_intensity: z.number().int().min(0).max(100).meta({ description: 'Filter strength in percent' }),
+    color: z.enum(CARD_COLORS).nullable().meta({ description: "The card's main colour; null = the category's colour" }),
+  })
+  .meta({ id: 'CardStyle', description: 'How the place is presented in the app, chosen by its author' });
+
 export const PlaceSummary = z
   .object({
     id: z.uuid(),
@@ -85,6 +119,7 @@ export const PlaceSummary = z
     author: Profile,
     my_rating: z.number().nullable().meta({ description: 'My overall rating, null if I have not rated it' }),
     is_saved: z.boolean(),
+    card_style: CardStyle,
     created_at: isoDate,
     updated_at: isoDate,
   })

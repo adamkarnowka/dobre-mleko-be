@@ -257,3 +257,57 @@ describe('editing places', () => {
     expect((await h.app.inject({ method: 'GET', url: '/me/saved', headers: ola.headers })).json().total).toBe(0);
   });
 });
+
+describe('card style', () => {
+  it('defaults to the app’s rotation, no filter and full strength', async () => {
+    const kuba = await login(h.app, 'kuba@gmail.com');
+    const id = await createPlace(h.app, kuba, pawilon);
+    const res = await h.app.inject({ method: 'GET', url: `/places/${id}`, headers: kuba.headers });
+    expect(res.json().card_style).toEqual({ layout: 'auto', photo_filter: 'none', filter_intensity: 100, color: null });
+  });
+
+  it('is set by the author when adding and editing, and shown to everyone in lists', async () => {
+    const kuba = await login(h.app, 'kuba@gmail.com');
+    const ola = await login(h.app, 'ola@gmail.com');
+    const res = await h.app.inject({
+      method: 'POST',
+      url: '/places',
+      headers: kuba.headers,
+      payload: {
+        ...pawilon,
+        rating: { vibe: 5, offer: 4 },
+        photo_ids: [await photoId(h.app, kuba)],
+        card_style: { layout: 'c', photo_filter: 'duotone', filter_intensity: 60, color: 'teal' },
+      },
+    });
+    expect(res.statusCode).toBe(201);
+    const id = res.json().id;
+    expect(res.json().card_style).toEqual({
+      layout: 'c',
+      photo_filter: 'duotone',
+      filter_intensity: 60,
+      color: 'teal',
+    });
+
+    const patch = (who: typeof kuba, card_style: object) =>
+      h.app.inject({ method: 'PATCH', url: `/places/${id}`, headers: who.headers, payload: { card_style } });
+    expect((await patch(ola, { photo_filter: 'riso' })).statusCode).toBe(403);
+    const edited = await patch(kuba, { photo_filter: 'riso' });
+    expect(edited.json().card_style).toEqual({
+      layout: 'c',
+      photo_filter: 'riso',
+      filter_intensity: 60,
+      color: 'teal',
+    });
+    // null brings back the category's colour; unknown colours are rejected.
+    expect((await patch(kuba, { color: null })).json().card_style.color).toBeNull();
+    expect((await patch(kuba, { color: 'gold' })).statusCode).toBe(422);
+    await patch(kuba, { color: 'teal' });
+    expect((await patch(kuba, { filter_intensity: 101 })).statusCode).toBe(422);
+    expect((await patch(kuba, { layout: 'd' })).statusCode).toBe(422);
+
+    const list = await h.app.inject({ method: 'GET', url: '/places', headers: ola.headers });
+    const item = list.json().items.find((p: { id: string }) => p.id === id);
+    expect(item.card_style).toEqual({ layout: 'c', photo_filter: 'riso', filter_intensity: 60, color: 'teal' });
+  });
+});
