@@ -46,4 +46,3 @@ export async function storeImage(ctx: Ctx, upload: ImageUpload): Promise<void> {
   await ctx.photos.put(upload.hash, upload.data);
   await ctx.photos.put(upload.hash, upload.thumb, 'thumb');
 }
-
