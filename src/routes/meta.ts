@@ -1,5 +1,6 @@
 import type { App, Ctx } from '../app.js';
-import { CATEGORIES, CRITERIA } from '../domain.js';
+import { listCategories } from '../categories.js';
+import { CRITERIA } from '../domain.js';
 import { Meta } from '../schemas.js';
 
 export function metaRoutes(app: App, ctx: Ctx) {
@@ -13,9 +14,10 @@ export function metaRoutes(app: App, ctx: Ctx) {
       },
     },
     async () => {
-      const settings = await ctx.settings.all();
+      const [settings, categories] = await Promise.all([ctx.settings.all(), listCategories(ctx.sql)]);
       return {
-        categories: [...CATEGORIES],
+        categories: categories.filter((c) => c.active).map((c) => c.id),
+        category_details: categories,
         criteria: CRITERIA.map((c) => ({ ...c })),
         gold_stars_per_month: settings.starsPerMonth,
         max_photo_bytes: settings.maxPhotoBytes,

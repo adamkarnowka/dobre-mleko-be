@@ -1,12 +1,13 @@
 // Response shapes (snake_case, ISO 8601 UTC dates, UUID strings). They document the API as OpenAPI components
 // and are enforced when responses are serialised.
 import { z } from 'zod';
-import { CATEGORIES, CRITERIA } from './domain.js';
+import { SHAPES } from './categories.js';
+import { CRITERIA } from './domain.js';
 
 const criterionKey = z.enum(CRITERIA.map((c) => c.key) as ['vibe', 'offer', 'service', 'value']);
 const isoDate = z.string().meta({ format: 'date-time' });
 const score = z.number().int().min(1).max(5);
-const category = z.enum(CATEGORIES);
+const category = z.string().meta({ description: 'A category id; `category_details` in GET /meta describes it' });
 const nextCursor = z.string().nullable().meta({ description: 'Pass as `cursor` for the next page; null at the end' });
 
 export const ErrorBody = z
@@ -242,9 +243,33 @@ export const MyStats = z
   })
   .meta({ id: 'MyStats' });
 
+export const Category = z
+  .object({
+    id: z.string().meta({ description: 'Stable id, used as `category_id` everywhere' }),
+    label: z.string().meta({ description: 'Polish name to show' }),
+    color: z.string().meta({ description: 'Main colour, `#RRGGBB`' }),
+    shape: z.enum(SHAPES).meta({
+      description:
+        'The category mark, drawn in `color` in a 44×44 box: `circle` (full circle), `half` (upper half disc ' +
+        'sitting on the bottom edge), `triangle` (apex up), `triangle_down` (apex down), `ring` (circle in ' +
+        '`color` with a 2 pt ink outline), `square`, `quarter` (quarter disc, square corner at bottom right), ' +
+        '`house` (pentagon: square with a roof, eaves at 18/44).',
+    }),
+    position: z.number().int().meta({ description: 'Display order, ascending' }),
+    active: z.boolean().meta({
+      description: 'False when retired: existing places keep it (still draw it), but do not offer it for new ones',
+    }),
+  })
+  .meta({ id: 'Category', description: 'A place category, managed by admins.' });
+
 export const Meta = z
   .object({
-    categories: z.array(category),
+    categories: z
+      .array(category)
+      .meta({ description: 'Ids of the active categories in display order (older clients; see category_details)' }),
+    category_details: z
+      .array(Category)
+      .meta({ description: 'Every category, retired ones too, in display order. Cache it with the rest of /meta.' }),
     criteria: z.array(z.object({ key: criterionKey, label: z.string(), required: z.boolean() })),
     gold_stars_per_month: z.number().int(),
     max_photo_bytes: z.number().int(),
@@ -303,3 +328,11 @@ export const Setting = z
   .meta({ id: 'Setting' });
 
 export const SettingList = z.object({ items: z.array(Setting) }).meta({ id: 'SettingList' });
+
+export const AdminCategory = Category.extend({
+  places: z.number().int().meta({ description: 'Places in this category' }),
+  updated_at: isoDate,
+  updated_by: z.object({ id: z.uuid(), display_name: z.string() }).nullable(),
+}).meta({ id: 'AdminCategory' });
+
+export const AdminCategoryList = z.object({ items: z.array(AdminCategory) }).meta({ id: 'AdminCategoryList' });

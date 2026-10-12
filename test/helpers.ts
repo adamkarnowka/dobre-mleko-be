@@ -52,7 +52,10 @@ export interface Harness {
   build: (overrides?: Record<string, string>) => Promise<TestApp>;
 }
 
-/** Fresh schema per test file, tables truncated before each test. */
+/** The categories migration 007 creates, restored before each test. */
+let defaultCategories: Record<string, unknown>[] = [];
+
+/** Fresh schema per test file, tables truncated before each test (categories reset to the defaults). */
 export function setup(): Harness {
   const h = { clock: { now: new Date('2026-10-11T12:00:00Z') } } as Harness;
 
@@ -60,6 +63,7 @@ export function setup(): Harness {
     h.sql = createDb(DATABASE_URL);
     await h.sql.unsafe('drop schema public cascade; create schema public;');
     await migrate(h.sql);
+    defaultCategories = await h.sql`select * from categories`;
     h.build = (overrides = {}) =>
       buildApp({
         config: testConfig(overrides),
@@ -73,7 +77,8 @@ export function setup(): Harness {
 
   beforeEach(async () => {
     h.clock.now = new Date('2026-10-11T12:00:00Z');
-    await h.sql`truncate users, places, place_photos, ratings, stars, comments, saved_places, allowed_emails, settings cascade`;
+    await h.sql`truncate users, places, place_photos, ratings, stars, comments, saved_places, allowed_emails, settings, categories cascade`;
+    await h.sql`insert into categories ${h.sql(defaultCategories)}`;
     rmSync(PHOTO_DIR, { recursive: true, force: true });
     await ensureAdmins(h.sql, [ADMIN]);
     for (const email of ALLOWED) await h.sql`insert into allowed_emails (email) values (${email})`;

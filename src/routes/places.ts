@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { App, Ctx } from '../app.js';
 import { view } from '../app.js';
-import { CATEGORIES, CRITERIA, monthStart, type CriterionKey } from '../domain.js';
+import { CATEGORY_ID, requireActiveCategory } from '../categories.js';
+import { CRITERIA, monthStart, type CriterionKey } from '../domain.js';
 import { HttpError, notFound } from '../errors.js';
 import { decodeCursor, page, pagingQuery } from '../paging.js';
 import { releaseFiles } from '../photo-store.js';
@@ -17,7 +18,7 @@ const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'expected HH:MM');
 
 const placeFields = {
   name: z.string().trim().min(1).max(120),
-  category_id: z.enum(CATEGORIES),
+  category_id: z.string().regex(CATEGORY_ID).meta({ description: 'An active category id (GET /meta)' }),
   status: z.enum(['active', 'temporarily_closed', 'closed']),
   price_level: z.number().int().min(1).max(4).nullable(),
   address: z.string().trim().max(200).nullable(),
@@ -109,7 +110,7 @@ const searchQuery = z
       .max(100)
       .optional()
       .meta({ description: 'Name, description, address or tags; ignores case and Polish accents' }),
-    categories: csv(z.enum(CATEGORIES)).meta({ description: 'Comma-separated, any of them' }),
+    categories: csv(z.string().min(1)).meta({ description: 'Comma-separated category ids, any of them' }),
     min_rating: z.coerce.number().min(0).max(5).optional(),
     gold_only: flag,
     tags: csv(z.string().min(1)).meta({ description: 'Comma-separated, at least one of them' }),
@@ -283,6 +284,7 @@ export function placeRoutes(app: App, ctx: Ctx) {
     },
     async (req, reply) => {
       const b = req.body;
+      await requireActiveCategory(sql, b.category_id);
       const id = await sql.begin(async (tx) => {
         if (b.google_place_id) {
           const [existing] = await tx<
@@ -354,7 +356,12 @@ export function placeRoutes(app: App, ctx: Ctx) {
       const b = req.body;
       const set: Record<string, unknown> = {};
       if (b.name !== undefined) set.name = b.name;
-      if (b.category_id !== undefined) set.category = b.category_id;
+      if (b.category_id !== undefined) {
+        // A place may stay in a retired category, but cannot move into one.
+        const [current] = await sql<{ category: string }[]>`select category from places where id = ${req.params.id}`;
+        if (b.category_id !== current?.category) await requireActiveCategory(sql, b.category_id);
+        set.category = b.category_id;
+      }
       if (b.status !== undefined) set.status = b.status;
       if (b.price_level !== undefined) set.price_level = b.price_level;
       if (b.address !== undefined) set.address = b.address;

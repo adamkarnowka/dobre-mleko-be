@@ -7,7 +7,7 @@ import { randomUUID } from 'node:crypto';
 import sharp from 'sharp';
 import { ensureAdmins } from './auth.js';
 import { createDb, migrate, type Sql } from './db.js';
-import { CATEGORIES, monthStart, type Category } from './domain.js';
+import { DEFAULT_CATEGORIES, monthStart, type DefaultCategory } from './domain.js';
 import { PhotoStore, processImage, sha256 } from './photo-store.js';
 
 export interface SeedOptions {
@@ -53,7 +53,7 @@ function rng(seed: number) {
   return { next, int, pick, sample, chance: (p: number) => next() < p };
 }
 
-const NAMES: Record<Category, { prefix: string[]; suffix: string[]; tags: string[]; about: string[] }> = {
+const NAMES: Record<DefaultCategory, { prefix: string[]; suffix: string[]; tags: string[]; about: string[] }> = {
   food: {
     prefix: ['Bistro', 'Jadłodajnia', 'Pierogarnia', 'Trattoria', 'Bar mleczny', 'Kuchnia'],
     suffix: ['Pod Lipą', 'Na Rogu', 'Stary Młyn', 'Smakosz', 'Babcia Zosia', 'Warszawianka', 'Pełny Talerz'],
@@ -192,7 +192,7 @@ async function placeholderPhoto(r: ReturnType<typeof rng>): Promise<Buffer> {
   return sharp(Buffer.from(svg)).jpeg({ quality: 82 }).toBuffer();
 }
 
-const HOURS: Record<Category, [string, string] | null> = {
+const HOURS: Record<DefaultCategory, [string, string] | null> = {
   food: ['11:00', '22:00'],
   coffee: ['08:00', '19:00'],
   bar: ['16:00', '02:00'],
@@ -251,7 +251,7 @@ export async function seed(sql: Sql, store: PhotoStore, opts: SeedOptions = {}) 
   const places: {
     id: string;
     name: string;
-    category: Category;
+    category: DefaultCategory;
     status: string;
     price_level: number | null;
     address: string;
@@ -268,7 +268,9 @@ export async function seed(sql: Sql, store: PhotoStore, opts: SeedOptions = {}) 
   }[] = [];
   for (let i = 0; i < placeCount; i++) {
     // Skew towards food, coffee and bars, like real life.
-    const category: Category = r.chance(0.45) ? r.pick(['food', 'coffee', 'bar'] as const) : r.pick(CATEGORIES);
+    const category: DefaultCategory = r.chance(0.45)
+      ? r.pick(['food', 'coffee', 'bar'] as const)
+      : r.pick(DEFAULT_CATEGORIES);
     const n = NAMES[category];
     let name = `${r.pick(n.prefix)} ${r.pick(n.suffix)}`;
     while (used.has(name)) name = `${r.pick(n.prefix)} ${r.pick(n.suffix)} ${r.int(2, 9)}`;

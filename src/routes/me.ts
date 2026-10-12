@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { App, Ctx } from '../app.js';
 import { view } from '../app.js';
-import { CATEGORIES, monthStart, type Category } from '../domain.js';
+import { requireCategories } from '../categories.js';
+import { monthStart, type Category } from '../domain.js';
 import { notFound } from '../errors.js';
 import { decodeCursor, page, pagingQuery } from '../paging.js';
 import { lockHash, releaseFiles } from '../photo-store.js';
@@ -46,7 +47,7 @@ const badge = z
   .nullable()
   .transform((b) => b || null);
 const favoriteCategories = z
-  .array(z.enum(CATEGORIES))
+  .array(z.string().min(1))
   .max(3)
   .refine((c) => new Set(c).size === c.length, 'Categories must be different');
 
@@ -78,6 +79,7 @@ export function meRoutes(app: App, ctx: Ctx) {
     },
     async (req) => {
       const b = req.body;
+      await requireCategories(sql, b.favorite_categories);
       await sql`
         update users set
           name = ${b.display_name}, badge = ${b.badge}, favorite_categories = ${b.favorite_categories},
@@ -109,7 +111,10 @@ export function meRoutes(app: App, ctx: Ctx) {
       const set: Record<string, unknown> = {};
       if (b.display_name !== undefined) set.name = b.display_name;
       if (b.badge !== undefined) set.badge = b.badge;
-      if (b.favorite_categories !== undefined) set.favorite_categories = b.favorite_categories;
+      if (b.favorite_categories !== undefined) {
+        await requireCategories(sql, b.favorite_categories);
+        set.favorite_categories = b.favorite_categories;
+      }
       if (Object.keys(set).length) await sql`update users set ${sql(set)} where id = ${req.user.id}`;
       return loadMe(ctx, req.user.id);
     },

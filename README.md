@@ -134,8 +134,8 @@ and `cursor` and return `{ items, next_cursor, total }`. Errors are `{"error": "
 | Comments | `GET\|POST /places/{id}/comments`, `PATCH\|DELETE /comments/{id}` |
 | Photos | `POST /photos` (upload), `DELETE /photos/{id}`, `GET /files/{hash}[/thumb]?exp&sig` (signed) |
 | Stats | `GET /stats/network`, `GET /stats/me` |
-| Meta | `GET /meta`: categories, rating criteria, limits, sign-in options |
-| Admin | `GET\|POST /admin/allowed`, `PATCH\|DELETE /admin/allowed/{email}`, `GET /admin/settings`, `PUT\|DELETE /admin/settings/{key}` |
+| Meta | `GET /meta`: categories (`category_details`), rating criteria, limits, sign-in options |
+| Admin | `GET\|POST /admin/allowed`, `PATCH\|DELETE /admin/allowed/{email}`, `GET /admin/settings`, `PUT\|DELETE /admin/settings/{key}`, `GET\|POST /admin/categories`, `PATCH\|DELETE /admin/categories/{id}`, `PUT /admin/categories/order` |
 
 ### Sign-in and profiles
 
@@ -148,9 +148,23 @@ it) and up to 3 favourite categories. Profiles shown to others never include the
 Every request re-checks the whitelist, the role and the account status, so removing someone, changing their role
 or suspending them applies to existing sessions immediately. Their content stays.
 
+### Categories
+
+Categories are data, managed by admins in the dashboard (`/admin/categories`), and every client reads them from
+`GET /meta`: `category_details` lists each one with its id, Polish `label`, `color` (`#RRGGBB`), `shape` (one of
+`circle half triangle triangle_down ring square quarter house`; the geometry is in the OpenAPI `Category` schema),
+`position` and `active`. Draw a category's mark from these instead of building categories into the app. Places
+refer to a category by id, which never changes; `categories` in `/meta` (active ids, in order) stays for older
+clients.
+
+A retired category (`active: false`) keeps its places, which still need drawing, but is not offered for new ones
+(422 when a place is added to it or moved into it). A category can be deleted only while no place uses it; it then
+also leaves people's favourite categories. One category always stays active. Migration 007 created the first
+eleven: `food coffee bar club kids culture nature sport shopping hotel other`.
+
 ### Places and search
 
-A place has a name, category (`food coffee bar club kids culture nature sport shopping hotel other`), location, optional
+A place has a name, category (see below), location, optional
 address, description (up to 500 characters), price level 1–4, tags, opening hours and a status (`active`,
 `temporarily_closed`, `closed`). `POST /places` adds it **together with the author's rating and photos** (and
 optionally a gold star) in one transaction. The author or an admin edits or deletes it.

@@ -1,4 +1,5 @@
-export const CATEGORIES = [
+/** The categories migration 007 created; admins can add more. The development fixtures use these. */
+export const DEFAULT_CATEGORIES = [
   'food',
   'coffee',
   'bar',
@@ -11,7 +12,9 @@ export const CATEGORIES = [
   'hotel',
   'other',
 ] as const;
-export type Category = (typeof CATEGORIES)[number];
+export type DefaultCategory = (typeof DEFAULT_CATEGORIES)[number];
+/** A category id (the categories table). */
+export type Category = string;
 
 export const CRITERIA = [
   { key: 'vibe', label: 'Klimat', required: true },
