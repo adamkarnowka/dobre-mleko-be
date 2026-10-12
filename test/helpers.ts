@@ -1,6 +1,7 @@
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach } from 'vitest';
 import { buildApp } from '../src/app.js';
 import { ensureAdmins, type GoogleIdentity } from '../src/auth.js';
@@ -60,13 +61,20 @@ export function setup(): Harness {
     await h.sql.unsafe('drop schema public cascade; create schema public;');
     await migrate(h.sql);
     h.build = (overrides = {}) =>
-      buildApp({ config: testConfig(overrides), sql: h.sql, verifyGoogle: fakeGoogle, now: () => h.clock.now });
+      buildApp({
+        config: testConfig(overrides),
+        sql: h.sql,
+        verifyGoogle: fakeGoogle,
+        now: () => h.clock.now,
+        settingsCacheMs: 0,
+      });
     h.app = await h.build();
   });
 
   beforeEach(async () => {
     h.clock.now = new Date('2026-10-11T12:00:00Z');
     await h.sql`truncate users, places, place_photos, ratings, stars, comments, saved_places, allowed_emails, settings cascade`;
+    rmSync(PHOTO_DIR, { recursive: true, force: true });
     await ensureAdmins(h.sql, [ADMIN]);
     for (const email of ALLOWED) await h.sql`insert into allowed_emails (email) values (${email})`;
   });
@@ -80,17 +88,67 @@ export function setup(): Harness {
   return h;
 }
 
-export async function login(app: TestApp, email: string): Promise<{ id: string; headers: { authorization: string } }> {
-  const res = await app.inject({ method: 'POST', url: '/auth/google', payload: { idToken: `google:${email}` } });
+export type Who = { id: string; headers: { authorization: string } };
+
+export async function login(app: TestApp, email: string): Promise<Who> {
+  const res = await app.inject({ method: 'POST', url: '/auth/google', payload: { id_token: `google:${email}` } });
   if (res.statusCode !== 200) throw new Error(`login failed: ${res.statusCode} ${res.body}`);
   const body = res.json();
   return { id: body.user.id, headers: { authorization: `Bearer ${body.token}` } };
 }
 
+/** A real, decodable JPEG; different seeds give different files. */
+export async function makeImage(seed = 0, width = 64, height = 48): Promise<Buffer> {
+  return sharp({
+    create: { width, height, channels: 3, background: { r: (seed * 37) % 256, g: (seed * 91) % 256, b: 120 } },
+  })
+    .jpeg()
+    .toBuffer();
+}
+
+export function multipart(parts: { name: string; value: string | Buffer; filename?: string; type?: string }[]) {
+  const boundary = '----mleko' + Math.random().toString(16).slice(2);
+  const chunks: Buffer[] = [];
+  for (const p of parts) {
+    const head =
+      `--${boundary}\r\nContent-Disposition: form-data; name="${p.name}"` +
+      (p.filename ? `; filename="${p.filename}"\r\nContent-Type: ${p.type ?? 'application/octet-stream'}` : '') +
+      '\r\n\r\n';
+    chunks.push(Buffer.from(head), Buffer.isBuffer(p.value) ? p.value : Buffer.from(p.value), Buffer.from('\r\n'));
+  }
+  chunks.push(Buffer.from(`--${boundary}--\r\n`));
+  return { payload: Buffer.concat(chunks), contentType: `multipart/form-data; boundary=${boundary}` };
+}
+
+export async function upload(
+  app: TestApp,
+  who: Who,
+  file: Buffer,
+  opts: { blurhash?: string; url?: string; method?: 'POST' | 'PUT' } = {},
+) {
+  const parts: Parameters<typeof multipart>[0] = [{ name: 'file', value: file, filename: 'x.jpg', type: 'image/jpeg' }];
+  if (opts.blurhash) parts.unshift({ name: 'blurhash', value: opts.blurhash });
+  const { payload, contentType } = multipart(parts);
+  return app.inject({
+    method: opts.method ?? 'POST',
+    url: opts.url ?? '/photos',
+    headers: { ...who.headers, 'content-type': contentType },
+    payload,
+  });
+}
+
+let imageSeed = 1;
+/** Uploads a fresh photo and returns its id. */
+export async function photoId(app: TestApp, who: Who): Promise<string> {
+  const res = await upload(app, who, await makeImage(imageSeed++));
+  if (res.statusCode !== 201) throw new Error(`upload failed: ${res.statusCode} ${res.body}`);
+  return res.json().id;
+}
+
 export const pawilon = {
   name: 'Pawilon Nocny',
-  category: 'club',
-  priceLevel: 2,
+  category_id: 'club',
+  price_level: 2,
   address: 'ul. Nowy Świat 22',
   location: { lat: 52.2319, lng: 21.0186 },
   description: 'Najlepszy dźwięk w mieście i zero lansu.',
@@ -99,19 +157,43 @@ export const pawilon = {
 
 export const podPionem = {
   name: 'Bar Pod Pionem',
-  category: 'bar',
+  category_id: 'bar',
   location: { lat: 52.2297, lng: 21.0122 },
 };
 
 export const kreska = {
   name: 'Kawiarnia Ostra Kreska',
-  category: 'coffee',
+  category_id: 'coffee',
   // Kraków, far from the others.
   location: { lat: 50.0614, lng: 19.9366 },
 };
 
-export async function createPlace(app: TestApp, headers: Record<string, string>, payload: object): Promise<string> {
-  const res = await app.inject({ method: 'POST', url: '/places', headers, payload });
+/**
+ * Adds a place with the author's rating and one fresh photo (both required). `rating` defaults to 4/4.
+ * Returns the new place's id.
+ */
+export async function createPlace(
+  app: TestApp,
+  who: Who,
+  payload: Record<string, unknown>,
+  rating: Record<string, unknown> = { vibe: 4, offer: 4 },
+): Promise<string> {
+  const res = await app.inject({
+    method: 'POST',
+    url: '/places',
+    headers: who.headers,
+    payload: { rating, photo_ids: [await photoId(app, who)], ...payload },
+  });
   if (res.statusCode !== 201) throw new Error(`create place failed: ${res.statusCode} ${res.body}`);
   return res.json().id;
+}
+
+/** Rates a place with a fresh photo. */
+export async function rate(app: TestApp, who: Who, placeId: string, scores: Record<string, unknown>) {
+  return app.inject({
+    method: 'PUT',
+    url: `/places/${placeId}/rating`,
+    headers: who.headers,
+    payload: { photo_ids: [await photoId(app, who)], ...scores },
+  });
 }

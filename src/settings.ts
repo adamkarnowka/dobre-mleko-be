@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { Sql } from './db.js';
-import { HttpError } from './errors.js';
+import { invalidInput } from './errors.js';
 
 /** Settings admins can change at runtime. Secrets and infrastructure stay in environment variables. */
 export const SETTINGS = {
@@ -26,11 +26,17 @@ export const SETTINGS = {
       .max(25 * 1024 * 1024),
     default: 8 * 1024 * 1024,
   },
-  maxPhotosPerPlace: {
-    label: 'Maks. zdjęć na miejsce',
-    description: 'Ile zdjęć może mieć jedno miejsce.',
-    schema: z.number().int().min(1).max(50),
-    default: 12,
+  maxPhotosPerRating: {
+    label: 'Maks. zdjęć do oceny',
+    description: 'Ile zdjęć można dołączyć do jednej oceny (każda ocena ma co najmniej jedno).',
+    schema: z.number().int().min(1).max(20),
+    default: 6,
+  },
+  starRankBonus: {
+    label: 'Premia rankingowa za gwiazdkę',
+    description: 'Ile punktów rankingu dodaje każda złota gwiazdka (nie zmienia wyświetlanej średniej).',
+    schema: z.number().min(0).max(1),
+    default: 0.15,
   },
 } as const;
 
@@ -74,7 +80,7 @@ export class Settings {
     const def = SETTINGS[key];
     const parsed = def.schema.safeParse(value);
     if (!parsed.success) {
-      throw new HttpError(400, 'invalid_setting', `${key}: ${parsed.error.issues.map((i) => i.message).join('; ')}`);
+      throw invalidInput(`${key}: ${parsed.error.issues.map((i) => i.message).join('; ')}`);
     }
     await this.sql`
       insert into settings (key, value, updated_by) values (${key}, ${this.sql.json(parsed.data)}, ${userId})

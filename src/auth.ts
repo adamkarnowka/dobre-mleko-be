@@ -3,7 +3,7 @@ import { OAuth2Client } from 'google-auth-library';
 import { SignJWT, jwtVerify } from 'jose';
 import type { Config } from './config.js';
 import type { Sql } from './db.js';
-import { HttpError } from './errors.js';
+import { HttpError, notAuthorized } from './errors.js';
 
 export interface GoogleIdentity {
   sub: string;
@@ -45,7 +45,7 @@ export class Sessions {
     this.key = new TextEncoder().encode(config.JWT_SECRET);
   }
 
-  async issue(userId: string, ttlDays: number): Promise<{ token: string; expiresAt: string }> {
+  async issue(userId: string, ttlDays: number): Promise<{ token: string; expires_at: string }> {
     const exp = Math.floor(Date.now() / 1000) + ttlDays * 86400;
     const token = await new SignJWT({})
       .setProtectedHeader({ alg: 'HS256' })
@@ -53,7 +53,7 @@ export class Sessions {
       .setIssuedAt()
       .setExpirationTime(exp)
       .sign(this.key);
-    return { token, expiresAt: new Date(exp * 1000).toISOString() };
+    return { token, expires_at: new Date(exp * 1000).toISOString() };
   }
 
   async verify(token: string): Promise<string | null> {
@@ -89,12 +89,15 @@ export function requireUser(deps: { sessions: Sessions; sql: Sql }) {
     const header = req.headers.authorization;
     const token = header?.startsWith('Bearer ') ? header.slice(7) : null;
     const userId = token ? await deps.sessions.verify(token) : null;
-    if (!userId) throw new HttpError(401, 'unauthorized', 'Sign in required');
-    const [user] = await deps.sql<{ id: string; email: string; role: Role | null }[]>`
-      select u.id, u.email, a.role from users u left join allowed_emails a on a.email = u.email where u.id = ${userId}
+    if (!userId) throw new HttpError(401, 'not_authenticated', 'Sign in required');
+    const [user] = await deps.sql<{ id: string; email: string; role: Role | null; status: string }[]>`
+      select u.id, u.email, a.role, u.status
+      from users u left join allowed_emails a on a.email = u.email
+      where u.id = ${userId}
     `;
-    if (!user) throw new HttpError(401, 'unauthorized', 'Sign in required');
-    if (!user.role) throw new HttpError(403, 'not_whitelisted', 'This account is not on the list');
+    if (!user) throw new HttpError(401, 'not_authenticated', 'Sign in required');
+    if (!user.role) throw notAuthorized('This account is not on the list');
+    if (user.status !== 'active') throw notAuthorized(`This account is ${user.status}`);
     req.user = { id: user.id, email: user.email, role: user.role };
   };
 }
@@ -103,7 +106,7 @@ export function requireUser(deps: { sessions: Sessions; sql: Sql }) {
 export function requireAdmin(requireSignedIn: ReturnType<typeof requireUser>) {
   return async (req: FastifyRequest, reply: FastifyReply) => {
     await requireSignedIn(req, reply);
-    if (req.user.role !== 'admin') throw new HttpError(403, 'admin_only', 'Admins only');
+    if (req.user.role !== 'admin') throw notAuthorized('Admins only');
   };
 }
 

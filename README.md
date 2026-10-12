@@ -52,20 +52,39 @@ npm run openapi -- openapi.json   # the OpenAPI document, as published to the do
 ## API
 
 The full reference with request and response schemas is in the [API docs](https://mwalczak.github.io/dobre-mleko-be/),
-generated from the route schemas in `src/` (responses are checked against the same schemas at runtime).
+generated from the route schemas in `src/` (responses are checked against the same schemas at runtime). It follows
+the iOS app's API contract (`docs/API_HANDOFF.md` in the app repo) except invites and the invite tree.
 
-- **Sign-in:** the app signs in with Google and sends the Google ID token to `POST /auth/google`. The server
-  checks the token, the whitelist, and returns a session token. Send it as `Authorization: Bearer <token>`.
-- **Places:** `GET /places` (search, category, distance and map-viewport (`bbox`) filters, sort by best / stars / near / newest),
-  `POST`, `GET`, `PATCH`, `DELETE /places/:id`, `PUT|DELETE /places/:id/saved`.
-- **Ratings:** `PUT|DELETE /places/:id/rating` with `vibe` and `offer` (required) and `service`, `value`
-  (optional, "nie dotyczy"), each 1–5. Ranking uses a Bayesian average (prior weight of 3 ratings).
-- **Golden stars:** `POST|DELETE /places/:id/star`, `starsPerMonth` per person, once per place per month,
-  no effect on the rating.
-- **Comments, photos, stats:** `/places/:id/comments`, `/places/:id/photos`, `/photos/:hash`, `/stats/network`,
-  `/stats/me`, plus `/me`, `/me/saved`, `/me/ratings` and `/meta`.
+**Conventions:** JSON in `snake_case`, dates in ISO 8601 (UTC), ids are UUID strings. Lists take `limit` (default 30)
+and `cursor`, and return `{ items, next_cursor, total }`. Errors are `{"error": "<code>", "message": "..."}`:
 
-Errors look like `{"error": {"code": "not_whitelisted", "message": "..."}}`.
+| Code | HTTP | When |
+|---|---|---|
+| `not_authenticated` | 401 | No or expired session: sign in again |
+| `not_authorized` | 403 | Not on the whitelist, suspended, or not allowed to do this |
+| `not_found` | 404 | No such resource |
+| `invalid_input` | 422 | Validation (scores, lengths, missing photo, …) |
+| `no_gold_stars_left`, `gold_star_already_awarded`, `gold_star_revoke_window_passed` | 409 | Gold star rules |
+| `rating_needs_photo`, `too_many_photos`, `place_exists` | 409 | Other conflicts |
+| `unsupported_type` / `file_too_large` | 415 / 413 | Uploads |
+
+- **Sign-in:** the app signs in with Google and sends the ID token to `POST /auth/google`, which checks the token
+  and the whitelist and returns a session token (`Authorization: Bearer <token>`). While `has_profile` is false the
+  app shows onboarding and finishes it with `POST /me/profile` (display name, badge up to 16 characters, up to 3
+  favourite categories).
+- **Places:** `GET /places` searches name, description, address and tags ignoring case and Polish accents, and
+  filters by categories, minimum rating, gold stars, tags, prices, radius, map viewport (`bbox`), author, unrated by
+  me, saved, closed; sorts by `best` (rank_score), `gold_stars`, `nearest`, `newest`, `most_commented`.
+  `POST /places` adds a place **together with the author's rating and photos** (and optionally a gold star).
+  Places have a `status` (`active`, `temporarily_closed`, `closed`); the author or an admin edits them.
+- **Ratings:** `PUT|DELETE /places/:id/rating`: `vibe` and `offer` required, `service` and `value` optional
+  ("nie dotyczy"), each 1–5. **Every rating has at least one photo** (up to `maxPhotosPerRating`).
+- **Gold stars:** `POST|DELETE /places/:id/gold-star`: `starsPerMonth` per person per month, once per place per
+  month, revocable during that month. They don't change the average; each adds `starRankBonus` to rank_score:
+  `rank_score = v/(v+3)·R + 3/(v+3)·C + bonus·gold_star_count`.
+- **Comments:** 1–1000 characters, oldest first; the author edits, the author or an admin deletes.
+- **Stats:** `/stats/network` (incl. star of the month, top 10, categories, weekly activity) and `/stats/me`
+  (incl. rating distribution and taste matches: Pearson correlation on places both rated, at least 3).
 
 ### Whitelist, admins and settings
 
@@ -81,7 +100,8 @@ Runtime settings (`settings` table, defaults in `src/settings.ts`), editable in 
 | `starsPerMonth` | `3` | Golden stars per person per month |
 | `sessionTtlDays` | `30` | Sign-in length, for new sign-ins |
 | `maxPhotoBytes` | 8 MB | Largest photo upload (100 KB – 25 MB) |
-| `maxPhotosPerPlace` | `12` | Photos per place |
+| `maxPhotosPerRating` | `6` | Photos per rating (at least 1) |
+| `starRankBonus` | `0.15` | rank_score added per gold star |
 
 Secrets and infrastructure (database, JWT secret, Google client IDs, time zone, photo directory) stay in
 environment variables. Admin endpoints are under `/admin/*` in the API docs.
@@ -104,10 +124,21 @@ for distances in metres (`maxDistanceKm` via `ST_DWithin`, `sort=near` via the `
 
 ### Photos
 
-Photo files are stored in `PHOTO_DIR` under their SHA-256 (`<dir>/6b/6b7f…`); the database keeps only the hash,
-type and size. The type is detected from the file (JPEG, PNG, WebP). Identical files share one copy, which is
-deleted when the last photo using it goes. `GET /photos/:hash` is public and cached forever, so image
-components need no headers; only hashes that belong to a photo are served.
+Photos belong to ratings. The app uploads a photo first (`POST /photos`, multipart, with an optional `blurhash`
+field), then passes its id in `photo_ids` when adding a place or rating one; uploads never attached are removed
+after 24 hours. Avatars are uploaded with `PUT /me/avatar`.
+
+Files are stored in `PHOTO_DIR` under their SHA-256 (`<dir>/6b/6b7f…`, plus a 400 px JPEG thumbnail `….thumb`); the
+database keeps only the hash, type, size, dimensions and blurhash. The type is detected from the file. Identical
+files share one copy, deleted when nothing uses it any more.
+
+Photos are private: responses carry signed URLs (`/files/<hash>?exp=…&sig=…`, thumbnails at `/files/<hash>/thumb`)
+that expire after 12–24 hours and stay the same within a 12-hour window, so clients can cache them.
+
+### Database extensions
+
+PostGIS (locations), `pg_trgm` (indexed substring search) and `unaccent` (accent-insensitive search), plus
+`pgcrypto`. All are created by the migrations; the `postgis/postgis` image ships them.
 
 ## Deploy
 

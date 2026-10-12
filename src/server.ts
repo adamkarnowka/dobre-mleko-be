@@ -4,6 +4,7 @@ import { buildApp } from './app.js';
 import { ensureAdmins } from './auth.js';
 import { loadConfig } from './config.js';
 import { createDb, migrate } from './db.js';
+import { cleanupUnattached, PhotoStore } from './photo-store.js';
 
 const config = loadConfig();
 
@@ -18,7 +19,20 @@ const app = await buildApp({ config, sql, logger: true });
 if (applied.length) app.log.info({ applied }, 'migrations applied');
 if (!config.ADMIN_EMAILS.length) app.log.warn('ADMIN_EMAILS is empty: nobody can open the admin dashboard');
 
+// Uploads that were never attached to a rating are removed after a day.
+const photos = new PhotoStore(config.PHOTO_DIR);
+const cleanup = setInterval(
+  () =>
+    cleanupUnattached(sql, photos, new Date(Date.now() - 24 * 3600 * 1000)).then(
+      (n) => n && app.log.info({ removed: n }, 'unattached photos removed'),
+      (err) => app.log.error(err, 'photo cleanup failed'),
+    ),
+  3600 * 1000,
+);
+cleanup.unref();
+
 const shutdown = async () => {
+  clearInterval(cleanup);
   await app.close();
   await sql.end({ timeout: 5 });
   process.exit(0);

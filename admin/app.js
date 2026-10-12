@@ -54,7 +54,7 @@ async function api(method, path, body) {
   const data = await res.json().catch(() => ({}));
   if (!res.ok) {
     if (res.status === 401) signOut();
-    throw new ApiError(res.status, data.error?.code ?? 'error', data.error?.message ?? res.statusText);
+    throw new ApiError(res.status, data.error ?? 'error', data.message ?? res.statusText);
   }
   return data;
 }
@@ -71,11 +71,11 @@ function toast(message, isError = false) {
 }
 
 const ERRORS = {
-  not_whitelisted: 'To konto nie jest na liście.',
+  not_authorized: 'Brak dostępu — to konto nie jest na liście albo nie ma uprawnień.',
   already_allowed: 'Ta osoba już jest na liście.',
   managed_by_environment: 'Ten admin jest ustawiony w ADMIN_EMAILS — zmień to w konfiguracji serwera.',
   cannot_change_self: 'Nie możesz odebrać uprawnień samemu sobie.',
-  invalid_setting: 'Wartość poza dozwolonym zakresem.',
+  invalid_input: 'Nieprawidłowa wartość — sprawdź zakres.',
 };
 const fail = (err) => toast(ERRORS[err.code] ?? err.message, true);
 
@@ -121,15 +121,15 @@ function signOut() {
 
 function showSignIn() {
   show('view-signin');
-  const clientId = state.meta?.googleWebClientId;
+  const clientId = state.meta?.google_web_client_id;
   $('google-missing').hidden = !!clientId;
-  $('dev-login').hidden = !state.meta?.devLogin;
+  $('dev-login').hidden = !state.meta?.dev_login;
   if (!clientId || $('google-button').childElementCount) return;
   const script = h('script', { src: 'https://accounts.google.com/gsi/client', async: true });
   script.addEventListener('load', () => {
     window.google.accounts.id.initialize({
       client_id: clientId,
-      callback: ({ credential }) => signInWith('/auth/google', { idToken: credential }),
+      callback: ({ credential }) => signInWith('/auth/google', { id_token: credential }),
     });
     window.google.accounts.id.renderButton($('google-button'), {
       theme: 'filled_black',
@@ -144,9 +144,9 @@ function showSignIn() {
 
 async function enter() {
   state.me = await api('GET', '/me');
-  $('who-name').textContent = state.me.name;
+  $('who-name').textContent = state.me.display_name;
   $('who').hidden = false;
-  if (!state.me.isAdmin) return show('view-denied');
+  if (!state.me.is_admin) return show('view-denied');
   show('view-dashboard');
   await Promise.all([loadStats(), loadPeople(), loadSettings()]);
 }
@@ -155,10 +155,10 @@ async function enter() {
 async function loadStats() {
   const s = await api('GET', '/stats/network');
   const items = [
-    ['Osoby', s.people],
+    ['Osoby', s.members],
     ['Miejsca', s.places],
     ['Oceny', s.ratings],
-    ['Gwiazdki w tym mies.', s.starsThisMonth],
+    ['Gwiazdki w tym mies.', s.gold_stars_this_month],
   ];
   $('stats').replaceChildren(...items.map(([k, v]) => h('div', {}, h('dt', {}, k), h('dd', {}, fmtNumber(v)))));
 }
@@ -175,12 +175,12 @@ async function loadPeople() {
 
 function personRow(p) {
   const isMe = p.email === state.me.email;
-  const locked = p.fromEnvironment || isMe;
-  const initials = (p.user?.name ?? p.email).slice(0, 1).toUpperCase();
+  const locked = p.from_environment || isMe;
+  const initials = (p.user?.display_name ?? p.email).slice(0, 1).toUpperCase();
   const avatar = h(
     'span',
     { class: `avatar${p.role === 'admin' ? ' admin' : ''}`, 'aria-hidden': 'true' },
-    p.user?.avatarUrl ? h('img', { src: p.user.avatarUrl, alt: '', referrerpolicy: 'no-referrer' }) : initials,
+    p.user?.avatar_url ? h('img', { src: p.user.avatar_url, alt: '', referrerpolicy: 'no-referrer' }) : initials,
   );
 
   const who = h(
@@ -193,9 +193,9 @@ function personRow(p) {
       h(
         'div',
         { class: 'person-name' },
-        p.user?.name ?? 'Jeszcze się nie zalogował(a)',
+        p.user?.display_name ?? 'Jeszcze się nie zalogował(a)',
         isMe && h('span', { class: 'badge' }, 'Ty'),
-        p.fromEnvironment && h('span', { class: 'badge badge-env', title: 'Ustawione w ADMIN_EMAILS' }, 'ENV'),
+        p.from_environment && h('span', { class: 'badge badge-env', title: 'Ustawione w ADMIN_EMAILS' }, 'ENV'),
         !p.user && h('span', { class: 'badge badge-pending' }, 'Czeka'),
       ),
       h('div', { class: 'person-email' }, p.email),
@@ -244,14 +244,14 @@ function personRow(p) {
         { class: 'activity' },
         `${p.user.places} miejsc · ${p.user.ratings} ocen`,
         h('br'),
-        `ostatnio ${fmtAgo(p.user.lastSeenAt)}`,
+        `ostatnio ${fmtAgo(p.user.last_seen_at)}`,
       )
     : h(
         'div',
         { class: 'activity' },
-        `dodano ${fmtAgo(p.createdAt)}`,
-        p.addedBy && h('br'),
-        p.addedBy && `przez ${p.addedBy.name}`,
+        `dodano ${fmtAgo(p.created_at)}`,
+        p.added_by && h('br'),
+        p.added_by && `przez ${p.added_by.display_name}`,
       );
 
   const remove = h(
@@ -260,9 +260,9 @@ function personRow(p) {
       type: 'button',
       class: 'btn btn-danger btn-small',
       disabled: locked,
-      title: p.fromEnvironment ? 'Ustawione w ADMIN_EMAILS' : isMe ? 'To Ty' : null,
+      title: p.from_environment ? 'Ustawione w ADMIN_EMAILS' : isMe ? 'To Ty' : null,
       onclick: async () => {
-        const name = p.user?.name ?? p.email;
+        const name = p.user?.display_name ?? p.email;
         if (!confirm(`Usunąć ${name} z listy? Straci dostęp od razu. Jego miejsca i oceny zostaną.`)) return;
         try {
           await api('DELETE', `/admin/allowed/${encodeURIComponent(p.email)}`);
@@ -322,7 +322,7 @@ function settingCard(s) {
     value: String(s.value),
     min: s.min ?? null,
     max: s.max ?? null,
-    step: '1',
+    step: s.integer ? '1' : '0.01',
     required: true,
   });
   const unit = UNITS[s.key] ? h('span', { class: 'setting-meta' }, UNITS[s.key](s.value)) : null;
@@ -347,11 +347,11 @@ function settingCard(s) {
     }
   };
 
-  const changed = s.updatedAt
+  const changed = s.updated_at
     ? h(
         'span',
         { class: 'changed' },
-        `Zmienione ${fmtDate(s.updatedAt)}${s.updatedBy ? ` przez ${s.updatedBy.name}` : ''}`,
+        `Zmienione ${fmtDate(s.updated_at)}${s.updated_by ? ` przez ${s.updated_by.display_name}` : ''}`,
       )
     : 'Wartość domyślna';
 
@@ -387,7 +387,7 @@ function settingCard(s) {
         h('button', { type: 'submit', class: 'btn btn-primary btn-small' }, 'Zapisz'),
         h(
           'button',
-          { type: 'button', class: 'btn btn-secondary btn-small', disabled: !s.updatedAt, onclick: reset },
+          { type: 'button', class: 'btn btn-secondary btn-small', disabled: !s.updated_at, onclick: reset },
           'Domyślna',
         ),
       ),

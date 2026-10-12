@@ -1,21 +1,15 @@
 import { z } from 'zod';
 import type { App, Ctx } from '../app.js';
 import { monthStart } from '../domain.js';
-import { HttpError } from '../errors.js';
-import { PlaceDetail, StarResult } from '../schemas.js';
+import { HttpError, notFound } from '../errors.js';
+import { releaseFiles } from '../photo-store.js';
+import { placeAuthor } from '../place-access.js';
+import { attachRatingPhotos, awardGoldStar, ratingBody } from '../rating-logic.js';
+import { GoldStarResult, PlaceDetail } from '../schemas.js';
 import { starsLeft } from './me.js';
-import { loadPlace, placeAuthor } from './places.js';
+import { loadPlace } from './places.js';
 
 const idParams = z.object({ id: z.uuid() });
-const score = z.number().int().min(1).max(5);
-
-const ratingBody = z.object({
-  vibe: score,
-  offer: score,
-  // null or omitted = "nie dotyczy"
-  service: score.nullable().default(null),
-  value: score.nullable().default(null),
-});
 
 export function ratingRoutes(app: App, ctx: Ctx) {
   const { sql, config } = ctx;
@@ -29,7 +23,9 @@ export function ratingRoutes(app: App, ctx: Ctx) {
         summary: 'Rate a place (or change my rating)',
         description:
           'Scores 1–5. `vibe` (klimat) and `offer` (oferta) are required; `service` (obsługa) and `value` ' +
-          '(wartość) may be null or left out ("nie dotyczy"). Overall = average of the given scores.',
+          '(wartość) may be null or left out ("nie dotyczy"). Overall = average of the given scores. Every rating ' +
+          'has at least one photo: upload with `POST /photos`, then pass `photo_ids` (added to the ones the rating ' +
+          'already has; up to `max_photos_per_rating`).',
         params: idParams,
         body: ratingBody,
         response: { 200: PlaceDetail },
@@ -37,14 +33,17 @@ export function ratingRoutes(app: App, ctx: Ctx) {
     },
     async (req) => {
       await placeAuthor(ctx, req.params.id);
-      const { vibe, offer, service, value } = req.body;
-      await sql`
-        insert into ratings (user_id, place_id, vibe, offer, service, value)
-        values (${req.user.id}, ${req.params.id}, ${vibe}, ${offer}, ${service}, ${value})
-        on conflict (user_id, place_id) do update set
-          vibe = excluded.vibe, offer = excluded.offer, service = excluded.service, value = excluded.value,
-          updated_at = now()
-      `;
+      const { vibe, offer, service, value, photo_ids } = req.body;
+      await sql.begin(async (tx) => {
+        await tx`
+          insert into ratings (user_id, place_id, vibe, offer, service, value)
+          values (${req.user.id}, ${req.params.id}, ${vibe}, ${offer}, ${service}, ${value})
+          on conflict (user_id, place_id) do update set
+            vibe = excluded.vibe, offer = excluded.offer, service = excluded.service, value = excluded.value,
+            updated_at = now()
+        `;
+        await attachRatingPhotos(tx, ctx, req.params.id, req.user.id, photo_ids);
+      });
       return loadPlace(ctx, req.params.id, req.user.id);
     },
   );
@@ -53,71 +52,86 @@ export function ratingRoutes(app: App, ctx: Ctx) {
     '/places/:id/rating',
     {
       preHandler: ctx.auth,
-      schema: { tags: ['Ratings'], summary: 'Remove my rating', params: idParams, response: { 200: PlaceDetail } },
+      schema: {
+        tags: ['Ratings'],
+        summary: 'Remove my rating',
+        description: 'Also removes the photos that belong to it.',
+        params: idParams,
+        response: { 200: PlaceDetail },
+      },
     },
     async (req) => {
       await placeAuthor(ctx, req.params.id);
-      await sql`delete from ratings where user_id = ${req.user.id} and place_id = ${req.params.id}`;
+      await sql.begin(async (tx) => {
+        await tx`delete from ratings where user_id = ${req.user.id} and place_id = ${req.params.id}`;
+        const photos = await tx<{ hash: string }[]>`
+          delete from place_photos where place_id = ${req.params.id} and uploaded_by = ${req.user.id} returning hash
+        `;
+        await releaseFiles(
+          tx,
+          ctx.photos,
+          photos.map((p) => p.hash),
+        );
+      });
       return loadPlace(ctx, req.params.id, req.user.id);
     },
   );
 
-  // Golden star: does not change the rating; limited by the starsPerMonth setting, once per place per month.
   app.post(
-    '/places/:id/star',
+    '/places/:id/gold-star',
     {
       preHandler: ctx.auth,
       schema: {
         tags: ['Ratings'],
-        summary: 'Give a golden star',
+        summary: 'Give a gold star',
         description:
-          '"Musisz tam iść". Does not change the rating. `starsPerMonth` (see /meta) per person per calendar month, once per ' +
-          'place per month; starring again is a no-op. 409 `no_stars_left`.',
+          '"Musisz tam iść". Does not change the displayed average but adds to rank_score. `gold_stars_per_month` ' +
+          '(see /meta) per person per calendar month (Europe/Warsaw), once per place per month. 409 ' +
+          '`no_gold_stars_left`, `gold_star_already_awarded`.',
         params: idParams,
-        response: { 200: StarResult },
+        response: { 200: GoldStarResult },
       },
     },
     async (req) => {
       await placeAuthor(ctx, req.params.id);
+      await sql.begin((tx) => awardGoldStar(tx, ctx, req.params.id, req.user.id));
       const month = monthStart(ctx.now(), config.TIME_ZONE);
-      await sql.begin(async (tx) => {
-        // Serialises a person's concurrent star requests so the quota cannot be overrun.
-        await tx`select id from users where id = ${req.user.id} for update`;
-        const [already] = await tx`
-        select 1 from stars where user_id = ${req.user.id} and place_id = ${req.params.id} and month = ${month}::date
-      `;
-        if (already) return;
-        const [{ used }] = await tx<[{ used: number }]>`
-        select count(*)::int as used from stars where user_id = ${req.user.id} and month = ${month}::date
-      `;
-        if (used >= (await ctx.settings.get('starsPerMonth'))) {
-          throw new HttpError(409, 'no_stars_left', 'No golden stars left this month');
-        }
-        await tx`insert into stars (user_id, place_id, month) values (${req.user.id}, ${req.params.id}, ${month}::date)`;
-      });
-      return { starred: true, left: await starsLeft(ctx, req.user.id, month) };
+      return { awarded: true, gold_stars_left: await starsLeft(ctx, req.user.id, month) };
     },
   );
 
-  // Takes back a star given this month, returning it to the quota.
   app.delete(
-    '/places/:id/star',
+    '/places/:id/gold-star',
     {
       preHandler: ctx.auth,
       schema: {
         tags: ['Ratings'],
-        summary: "Take back this month's star",
-        description: 'The star returns to the monthly quota.',
+        summary: 'Take back my gold star',
+        description:
+          'Only during the month it was given; it returns to the quota. 409 `gold_star_revoke_window_passed` for a ' +
+          'star from an earlier month, 404 when there is none.',
         params: idParams,
-        response: { 200: StarResult },
+        response: { 200: GoldStarResult },
       },
     },
     async (req) => {
       const month = monthStart(ctx.now(), config.TIME_ZONE);
-      await sql`
-      delete from stars where user_id = ${req.user.id} and place_id = ${req.params.id} and month = ${month}::date
-    `;
-      return { starred: false, left: await starsLeft(ctx, req.user.id, month) };
+      const removed = await sql`
+        delete from stars where user_id = ${req.user.id} and place_id = ${req.params.id} and month = ${month}::date
+        returning 1
+      `;
+      if (!removed.length) {
+        const [earlier] = await sql`select 1 from stars where user_id = ${req.user.id} and place_id = ${req.params.id}`;
+        if (earlier) {
+          throw new HttpError(
+            409,
+            'gold_star_revoke_window_passed',
+            'Gold stars can only be taken back in their month',
+          );
+        }
+        throw notFound('Gold star');
+      }
+      return { awarded: false, gold_stars_left: await starsLeft(ctx, req.user.id, month) };
     },
   );
 }

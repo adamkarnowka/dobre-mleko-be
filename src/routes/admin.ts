@@ -21,6 +21,7 @@ interface AllowedRow {
   user_id: string | null;
   user_name: string | null;
   avatar_url: string | null;
+  avatar_hash: string | null;
   joined_at: Date | null;
   last_seen_at: Date | null;
   places: number;
@@ -34,7 +35,7 @@ export function adminRoutes(app: App, ctx: Ctx) {
   const selectAllowed = (where: ReturnType<typeof sql>) => sql<AllowedRow[]>`
     select a.email, a.role, a.note, a.created_at,
            ab.id as added_by_id, ab.name as added_by_name,
-           u.id as user_id, u.name as user_name, u.avatar_url, u.created_at as joined_at, u.last_seen_at,
+           u.id as user_id, u.name as user_name, u.avatar_url, u.avatar_hash, u.created_at as joined_at, u.last_seen_at,
            (select count(*)::int from places p where p.added_by = u.id) as places,
            (select count(*)::int from ratings r where r.user_id = u.id) as ratings
     from allowed_emails a
@@ -48,16 +49,16 @@ export function adminRoutes(app: App, ctx: Ctx) {
     email: r.email,
     role: r.role,
     note: r.note,
-    fromEnvironment: fromEnvironment(r.email),
-    addedBy: r.added_by_id ? { id: r.added_by_id, name: r.added_by_name! } : null,
-    createdAt: r.created_at.toISOString(),
+    from_environment: fromEnvironment(r.email),
+    added_by: r.added_by_id ? { id: r.added_by_id, display_name: r.added_by_name! } : null,
+    created_at: r.created_at.toISOString(),
     user: r.user_id
       ? {
           id: r.user_id,
-          name: r.user_name!,
-          avatarUrl: r.avatar_url,
-          joinedAt: r.joined_at!.toISOString(),
-          lastSeenAt: r.last_seen_at!.toISOString(),
+          display_name: r.user_name!,
+          avatar_url: r.avatar_hash ? ctx.urls.url(r.avatar_hash, 'thumb') : r.avatar_url,
+          joined_at: r.joined_at!.toISOString(),
+          last_seen_at: r.last_seen_at!.toISOString(),
           places: r.places,
           ratings: r.ratings,
         }
@@ -196,8 +197,9 @@ export function adminRoutes(app: App, ctx: Ctx) {
         default: def.default,
         min: def.schema.minValue ?? null,
         max: def.schema.maxValue ?? null,
-        updatedAt: row ? row.updated_at.toISOString() : null,
-        updatedBy: row?.user_id ? { id: row.user_id, name: row.user_name! } : null,
+        integer: def.schema.isInt,
+        updated_at: row ? row.updated_at.toISOString() : null,
+        updated_by: row?.user_id ? { id: row.user_id, display_name: row.user_name! } : null,
       };
     });
   }
@@ -218,7 +220,7 @@ export function adminRoutes(app: App, ctx: Ctx) {
       schema: {
         tags: ['Admin'],
         summary: 'Change a setting',
-        description: 'Takes effect within seconds. 400 `invalid_setting` when the value is out of range.',
+        description: 'Takes effect within seconds. 422 `invalid_input` when the value is out of range.',
         params: settingParams,
         body: z.object({ value: z.unknown() }),
         response: { 200: Setting },

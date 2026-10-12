@@ -1,62 +1,98 @@
-// Response shapes. They document the API (OpenAPI components) and are enforced when responses are serialised.
+// Response shapes (snake_case, ISO 8601 UTC dates, UUID strings). They document the API as OpenAPI components
+// and are enforced when responses are serialised.
 import { z } from 'zod';
 import { CATEGORIES, CRITERIA } from './domain.js';
 
 const criterionKey = z.enum(CRITERIA.map((c) => c.key) as ['vibe', 'offer', 'service', 'value']);
 const isoDate = z.string().meta({ format: 'date-time' });
 const score = z.number().int().min(1).max(5);
+const category = z.enum(CATEGORIES);
+const nextCursor = z.string().nullable().meta({ description: 'Pass as `cursor` for the next page; null at the end' });
 
 export const ErrorBody = z
-  .object({ error: z.object({ code: z.string(), message: z.string() }).loose() })
-  .meta({ id: 'Error' });
-
-export const StarsQuota = z
   .object({
-    perMonth: z.number().int(),
-    left: z.number().int(),
-    month: z.string().meta({ description: 'First day of the current month, YYYY-MM-DD' }),
+    error: z.string().meta({ description: 'Machine-readable code, e.g. `not_authorized`, `invalid_input`' }),
+    message: z.string().meta({ description: 'For logs and developers, not for display' }),
   })
-  .meta({ id: 'StarsQuota' });
+  .loose()
+  .meta({ id: 'Error' });
 
 export const Profile = z
   .object({
     id: z.uuid(),
-    email: z.string(),
-    name: z.string(),
-    avatarUrl: z.string().nullable(),
-    joinedAt: isoDate,
-    isAdmin: z.boolean().meta({ description: 'Can open the admin dashboard at /admin/' }),
-    stars: StarsQuota,
+    display_name: z.string(),
+    badge: z.string().nullable(),
+    role: z.enum(['member', 'admin']),
+    status: z.enum(['active', 'suspended', 'deleted']),
+    favorite_categories: z.array(category),
+    avatar_url: z.string().nullable().meta({ description: 'Signed URL of the own avatar, else the Google picture' }),
+    created_at: isoDate,
   })
-  .meta({ id: 'Profile' });
+  .meta({ id: 'Profile', description: 'A member as others see them.' });
+
+export const GoldStarQuota = z
+  .object({
+    per_month: z.number().int(),
+    left: z.number().int(),
+    month: z.string().meta({ description: 'First day of the current month (Europe/Warsaw), YYYY-MM-DD' }),
+  })
+  .meta({ id: 'GoldStarQuota' });
+
+export const Me = Profile.extend({
+  email: z.string(),
+  is_admin: z.boolean().meta({ description: 'Can open the admin dashboard at /admin/' }),
+  has_profile: z.boolean().meta({ description: 'false until POST /me/profile; the app shows onboarding' }),
+  gold_stars: GoldStarQuota,
+}).meta({ id: 'Me', description: 'The signed-in member.' });
 
 export const Session = z
-  .object({ token: z.string(), expiresAt: isoDate, user: Profile })
+  .object({ token: z.string(), expires_at: isoDate, has_profile: z.boolean(), user: Me })
   .meta({ id: 'Session', description: 'Send the token as `Authorization: Bearer <token>`.' });
 
-const Person = z.object({ id: z.uuid(), name: z.string() });
+export const PhotoFile = z
+  .object({
+    id: z.uuid(),
+    url: z.string().meta({ description: 'Signed, valid 12–24 h' }),
+    thumb_url: z.string().meta({ description: `Signed 400 px JPEG` }),
+    blurhash: z.string().nullable(),
+    width: z.number().int().nullable(),
+    height: z.number().int().nullable(),
+  })
+  .meta({ id: 'Photo' });
+
+export const Location = z.object({ lat: z.number(), lng: z.number() });
 
 export const PlaceSummary = z
   .object({
     id: z.uuid(),
     name: z.string(),
-    category: z.enum(CATEGORIES),
-    priceLevel: z.number().int().min(1).max(4).nullable(),
+    category_id: category,
+    status: z.enum(['active', 'temporarily_closed', 'closed']),
+    price_level: z.number().int().min(1).max(4).nullable(),
     address: z.string().nullable(),
-    location: z.object({ lat: z.number(), lng: z.number() }),
+    description: z.string().nullable(),
+    location: Location,
     tags: z.array(z.string()),
-    openNow: z.boolean().nullable().meta({ description: 'null when opening hours are unknown' }),
-    rating: z.object({ average: z.number().nullable(), count: z.number().int() }),
-    stars: z.object({ total: z.number().int(), thisMonth: z.number().int() }),
-    coverPhotoUrl: z.string().nullable(),
-    distanceKm: z.number().nullable().meta({ description: 'Only when lat/lng were given' }),
-    addedBy: Person,
-    saved: z.boolean(),
-    createdAt: isoDate,
+    open_now: z.boolean().nullable().meta({ description: 'null when opening hours are unknown' }),
+    rating_avg: z.number().nullable(),
+    rating_count: z.number().int(),
+    gold_star_count: z.number().int(),
+    gold_stars_this_month: z.number().int(),
+    comment_count: z.number().int(),
+    rank_score: z.number(),
+    cover_photo: PhotoFile.nullable(),
+    distance_m: z.number().nullable().meta({ description: 'Only when lat/lng were given' }),
+    author: Profile,
+    my_rating: z.number().nullable().meta({ description: 'My overall rating, null if I have not rated it' }),
+    is_saved: z.boolean(),
+    created_at: isoDate,
+    updated_at: isoDate,
   })
   .meta({ id: 'PlaceSummary' });
 
-export const PlaceList = z.object({ total: z.number().int(), items: z.array(PlaceSummary) }).meta({ id: 'PlaceList' });
+export const PlaceList = z
+  .object({ items: z.array(PlaceSummary), next_cursor: nextCursor, total: z.number().int() })
+  .meta({ id: 'PlaceList' });
 
 export const OpeningPeriod = z
   .object({
@@ -66,96 +102,121 @@ export const OpeningPeriod = z
   })
   .meta({ id: 'OpeningPeriod' });
 
-export const Photo = z.object({ id: z.uuid(), url: z.string() }).meta({ id: 'Photo' });
-
 export const Scores = z.object({ vibe: score, offer: score, service: score.nullable(), value: score.nullable() }).meta({
   id: 'Scores',
   description: 'vibe = klimat, offer = oferta, service = obsługa, value = wartość; null = nie dotyczy',
 });
 
-export const PlaceDetail = PlaceSummary.extend({
-  description: z.string().nullable(),
-  googlePlaceId: z.string().nullable(),
-  openingHours: z.array(OpeningPeriod).nullable(),
-  photos: z.array(Photo),
-  criteria: z.array(z.object({ key: criterionKey, average: z.number().nullable(), count: z.number().int() })),
-  strongestCriterion: criterionKey.nullable(),
-  commentsCount: z.number().int(),
-  myRating: z.object({ scores: Scores, overall: z.number(), updatedAt: isoDate }).nullable(),
-  myStar: z.object({ givenThisMonth: z.boolean(), left: z.number().int() }),
-  updatedAt: isoDate,
-}).meta({ id: 'PlaceDetail' });
-
-export const MyRatingList = z
-  .object({
-    total: z.number().int(),
-    items: z.array(
-      z.object({
-        place: z.object({ id: z.uuid(), name: z.string(), category: z.enum(CATEGORIES) }),
-        scores: Scores,
-        overall: z.number(),
-        updatedAt: isoDate,
-      }),
-    ),
-  })
-  .meta({ id: 'MyRatingList' });
-
-export const StarResult = z.object({ starred: z.boolean(), left: z.number().int() }).meta({ id: 'StarResult' });
-export const SavedResult = z.object({ saved: z.boolean() }).meta({ id: 'SavedResult' });
-
 export const Comment = z
   .object({
     id: z.uuid(),
     body: z.string(),
-    createdAt: isoDate,
-    author: Person.extend({ avatarUrl: z.string().nullable() }),
-    authorRating: z.number().nullable().meta({ description: "The author's current overall rating of the place" }),
+    author: Profile,
+    author_rating: z.number().nullable().meta({ description: "The author's current overall rating of the place" }),
+    is_mine: z.boolean(),
+    created_at: isoDate,
+    updated_at: isoDate.nullable(),
   })
   .meta({ id: 'Comment' });
 
-export const CommentList = z.object({ total: z.number().int(), items: z.array(Comment) }).meta({ id: 'CommentList' });
+export const PlaceDetail = PlaceSummary.extend({
+  google_place_id: z.string().nullable(),
+  opening_hours: z.array(OpeningPeriod).nullable(),
+  photos: z.array(PhotoFile.extend({ uploaded_by: z.uuid() })),
+  criteria: z.array(z.object({ key: criterionKey, average: z.number().nullable(), count: z.number().int() })),
+  strongest_criterion: criterionKey.nullable(),
+  rating_distribution: z
+    .object({ 1: z.number().int(), 2: z.number().int(), 3: z.number().int(), 4: z.number().int(), 5: z.number().int() })
+    .meta({ description: 'Overall ratings rounded to whole stars' }),
+  my_scores: Scores.nullable(),
+  gold_star_awarders: z.array(Profile).meta({ description: 'Everyone who gave a gold star, newest first' }),
+  my_gold_star: z.object({ awarded_at: isoDate }).nullable().meta({ description: 'My star this month' }),
+  can_revoke_gold_star: z.boolean(),
+  gold_stars_left: z.number().int(),
+  comments: z.array(Comment).meta({ description: 'Oldest first' }),
+  is_mine: z.boolean().meta({ description: 'I added this place' }),
+}).meta({ id: 'PlaceDetail' });
+
+export const MyRatingList = z
+  .object({
+    items: z.array(
+      z.object({
+        place: z.object({ id: z.uuid(), name: z.string(), category_id: category }),
+        scores: Scores,
+        overall: z.number(),
+        updated_at: isoDate,
+      }),
+    ),
+    next_cursor: nextCursor,
+    total: z.number().int(),
+  })
+  .meta({ id: 'MyRatingList' });
+
+export const GoldStarResult = z
+  .object({ awarded: z.boolean(), gold_stars_left: z.number().int() })
+  .meta({ id: 'GoldStarResult' });
+export const SavedResult = z.object({ is_saved: z.boolean() }).meta({ id: 'SavedResult' });
+
+export const CommentList = z
+  .object({ items: z.array(Comment), next_cursor: nextCursor, total: z.number().int() })
+  .meta({ id: 'CommentList' });
+
+const CategoryCount = z.object({ category_id: category, count: z.number().int() });
 
 export const NetworkStats = z
   .object({
+    members: z.number().int(),
     places: z.number().int(),
-    people: z.number().int(),
     ratings: z.number().int(),
-    averageRating: z.number().nullable(),
+    average_rating: z.number().nullable(),
     month: z.string(),
-    starsThisMonth: z.number().int(),
-    starOfTheMonth: z.object({ place: PlaceSummary, stars: z.number().int() }).nullable(),
+    gold_stars_this_month: z.number().int(),
+    star_of_the_month: z.object({ place: PlaceSummary, stars: z.number().int() }).nullable(),
     top: z.array(PlaceSummary),
-    categories: z.array(
-      z.object({
-        category: z.enum(CATEGORIES),
-        count: z.number().int(),
-        share: z.number().meta({ description: '0–1' }),
-      }),
-    ),
+    categories: z.array(CategoryCount).meta({ description: 'Places per category, most first' }),
+    weekly_activity: z
+      .array(z.number().int())
+      .meta({ description: 'Ratings per week for the last 12 weeks (Monday-based), oldest first' }),
   })
   .meta({ id: 'NetworkStats' });
 
 export const MyStats = z
   .object({
-    placesAdded: z.number().int(),
-    ratings: z.number().int(),
-    averageGiven: z.number().nullable(),
+    places_added: z.number().int(),
+    ratings_given: z.number().int(),
+    average_given: z.number().nullable(),
+    distribution: z
+      .object({
+        1: z.number().int(),
+        2: z.number().int(),
+        3: z.number().int(),
+        4: z.number().int(),
+        5: z.number().int(),
+      })
+      .meta({ description: 'My overall ratings rounded to whole stars' }),
+    categories: z.array(CategoryCount).meta({ description: 'Places I rated, per category, most first' }),
+    taste_matches: z
+      .array(z.object({ profile: Profile, match: z.number() }))
+      .meta({ description: 'Top 3 members by taste match (0–1), from at least 3 places rated by both' }),
+    my_places_with_stars: z
+      .array(z.object({ place: PlaceSummary, stars: z.number().int() }))
+      .meta({ description: 'Places I added that got gold stars, most first' }),
     comments: z.number().int(),
     saved: z.number().int(),
-    stars: z.object({ givenTotal: z.number().int(), givenThisMonth: z.number().int(), left: z.number().int() }),
+    gold_stars: z.object({ given_total: z.number().int(), given_this_month: z.number().int(), left: z.number().int() }),
   })
   .meta({ id: 'MyStats' });
 
 export const Meta = z
   .object({
-    categories: z.array(z.enum(CATEGORIES)),
+    categories: z.array(category),
     criteria: z.array(z.object({ key: criterionKey, label: z.string(), required: z.boolean() })),
-    starsPerMonth: z.number().int(),
-    maxPhotoBytes: z.number().int(),
-    maxPhotosPerPlace: z.number().int(),
-    timeZone: z.string(),
-    googleWebClientId: z.string().nullable().meta({ description: 'For Google sign-in on the web (admin dashboard)' }),
-    devLogin: z.boolean().meta({ description: 'Whether POST /auth/dev is available (never in production)' }),
+    gold_stars_per_month: z.number().int(),
+    max_photo_bytes: z.number().int(),
+    max_photos_per_rating: z.number().int(),
+    time_zone: z.string(),
+    google_web_client_id: z.string().nullable().meta({ description: 'For Google sign-in on the web (dashboard)' }),
+    dev_login: z.boolean().meta({ description: 'Whether POST /auth/dev is available (never in production)' }),
   })
   .meta({ id: 'Meta' });
 
@@ -166,16 +227,16 @@ export const AllowedEmail = z
     email: z.string(),
     role: Role,
     note: z.string().nullable(),
-    fromEnvironment: z.boolean().meta({ description: 'Listed in ADMIN_EMAILS: cannot be removed or demoted here' }),
-    addedBy: z.object({ id: z.uuid(), name: z.string() }).nullable(),
-    createdAt: isoDate,
+    from_environment: z.boolean().meta({ description: 'Listed in ADMIN_EMAILS: cannot be removed or demoted here' }),
+    added_by: z.object({ id: z.uuid(), display_name: z.string() }).nullable(),
+    created_at: isoDate,
     user: z
       .object({
         id: z.uuid(),
-        name: z.string(),
-        avatarUrl: z.string().nullable(),
-        joinedAt: isoDate,
-        lastSeenAt: isoDate,
+        display_name: z.string(),
+        avatar_url: z.string().nullable(),
+        joined_at: isoDate,
+        last_seen_at: isoDate,
         places: z.number().int(),
         ratings: z.number().int(),
       })
@@ -193,12 +254,13 @@ export const Setting = z
     key: z.string(),
     label: z.string(),
     description: z.string(),
-    value: z.unknown(),
-    default: z.unknown(),
+    value: z.number(),
+    default: z.number(),
     min: z.number().nullable(),
     max: z.number().nullable(),
-    updatedAt: isoDate.nullable(),
-    updatedBy: z.object({ id: z.uuid(), name: z.string() }).nullable(),
+    integer: z.boolean(),
+    updated_at: isoDate.nullable(),
+    updated_by: z.object({ id: z.uuid(), display_name: z.string() }).nullable(),
   })
   .meta({ id: 'Setting' });
 

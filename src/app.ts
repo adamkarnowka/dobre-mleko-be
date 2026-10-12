@@ -22,6 +22,7 @@ import { createGoogleVerifier, requireAdmin, requireUser, Sessions, type GoogleV
 import type { Config } from './config.js';
 import type { Sql } from './db.js';
 import { HttpError } from './errors.js';
+import { FileUrls } from './file-urls.js';
 import { PhotoStore } from './photo-store.js';
 import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
@@ -41,6 +42,8 @@ export interface AppDeps {
   verifyGoogle?: GoogleVerifier;
   now?: () => Date;
   logger?: boolean;
+  /** How long settings are cached (default 10 s). */
+  settingsCacheMs?: number;
 }
 
 export interface Ctx {
@@ -54,8 +57,13 @@ export interface Ctx {
   admin: preHandlerHookHandler;
   settings: Settings;
   photos: PhotoStore;
+  /** Signs photo and avatar URLs. */
+  urls: FileUrls;
   now: () => Date;
 }
+
+/** What place and profile mappers need to render a response. */
+export const view = (ctx: Ctx) => ({ timeZone: ctx.config.TIME_ZONE, now: ctx.now(), urls: ctx.urls });
 
 export type App = FastifyInstance<
   RawServerDefault,
@@ -83,9 +91,18 @@ export async function buildApp(deps: AppDeps) {
           'Place ratings for friends only. Only Google accounts on the server whitelist can sign in.',
           '',
           '**Signing in:** the app signs in with Google, sends the Google ID token to `POST /auth/google` and gets a',
-          'session token back. Send it on every other request as `Authorization: Bearer <token>`.',
+          'session token back. Send it on every other request as `Authorization: Bearer <token>`. When',
+          '`has_profile` is false, the app shows onboarding and finishes it with `POST /me/profile`.',
           '',
-          '**Errors** look like `{"error": {"code": "not_whitelisted", "message": "..."}}`.',
+          '**Conventions:** JSON in snake_case, dates in ISO 8601 (UTC), ids are UUID strings. Lists are paginated',
+          "with `limit` and `cursor`; pass the response's `next_cursor` to get the next page.",
+          '',
+          '**Errors** look like `{"error": "not_authorized", "message": "..."}`. Codes: `not_authenticated` (401,',
+          'sign in again), `not_authorized` (403), `not_found` (404), `invalid_input` (422), `no_gold_stars_left`,',
+          '`gold_star_already_awarded`, `rating_needs_photo` and other conflicts (409).',
+          '',
+          '**Photos** are private: their URLs are signed and expire after 12–24 h, so always use the URLs from the',
+          'latest response.',
         ].join('\n'),
       },
       components: { securitySchemes: { bearerAuth: { type: 'http', scheme: 'bearer' } } },
@@ -96,24 +113,24 @@ export async function buildApp(deps: AppDeps) {
 
   app.setErrorHandler((err, req, reply) => {
     if (err instanceof HttpError) {
-      return reply.status(err.statusCode).send({ error: { code: err.code, message: err.message } });
+      return reply.status(err.statusCode).send({ error: err.code, message: err.message, ...err.extra });
     }
     const e = err as { validation?: unknown; statusCode?: number; code?: string; message: string };
-    if (e.validation) {
-      return reply.status(400).send({ error: { code: 'invalid_request', message: e.message } });
-    }
+    if (e.validation) return reply.status(422).send({ error: 'invalid_input', message: e.message });
+    if (e.code === 'FST_REQ_FILE_TOO_LARGE')
+      return reply.status(413).send({ error: 'file_too_large', message: e.message });
     if (e.statusCode && e.statusCode < 500) {
-      return reply.status(e.statusCode).send({ error: { code: e.code ?? 'bad_request', message: e.message } });
+      const code = e.statusCode === 400 || e.statusCode === 415 ? 'invalid_input' : 'bad_request';
+      return reply.status(e.statusCode).send({ error: code, message: e.message });
     }
     req.log.error(err);
-    return reply.status(500).send({ error: { code: 'internal', message: 'Something went wrong' } });
+    return reply.status(500).send({ error: 'internal', message: 'Something went wrong' });
   });
-  app.setNotFoundHandler((_req, reply) =>
-    reply.status(404).send({ error: { code: 'not_found', message: 'Not found' } }),
-  );
+  app.setNotFoundHandler((_req, reply) => reply.status(404).send({ error: 'not_found', message: 'Not found' }));
 
   const sessions = new Sessions(config);
   const auth = requireUser({ sessions, sql });
+  const now = deps.now ?? (() => new Date());
   const ctx: Ctx = {
     config,
     sql,
@@ -123,9 +140,10 @@ export async function buildApp(deps: AppDeps) {
       createGoogleVerifier([...config.GOOGLE_CLIENT_IDS, config.GOOGLE_WEB_CLIENT_ID].filter(Boolean)),
     auth,
     admin: requireAdmin(auth),
-    settings: new Settings(sql),
+    settings: new Settings(sql, deps.settingsCacheMs),
     photos: new PhotoStore(config.PHOTO_DIR),
-    now: deps.now ?? (() => new Date()),
+    urls: new FileUrls(config.JWT_SECRET, now),
+    now,
   };
 
   // Every documented route shares the error shape; signed-in routes are marked as needing the bearer token.

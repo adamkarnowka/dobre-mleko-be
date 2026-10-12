@@ -29,33 +29,45 @@ function polish(doc: Json, serverUrl: string): Json {
         op.responses = { 204: { description: 'Done, no content' }, ...op.responses };
       }
     }
-    if (path === '/places/{id}/photos') {
-      ops.post.requestBody = {
-        required: true,
-        content: {
-          'multipart/form-data': {
-            schema: {
-              type: 'object',
-              properties: { photo: { type: 'string', format: 'binary' } },
-              required: ['photo'],
+    const imageUpload = {
+      required: true,
+      content: {
+        'multipart/form-data': {
+          schema: {
+            type: 'object',
+            properties: {
+              file: { type: 'string', format: 'binary', description: 'JPEG, PNG or WebP' },
+              blurhash: { type: 'string', description: 'Optional, computed on the phone' },
             },
+            required: ['file'],
           },
         },
-      };
-    }
-    if (path === '/photos/{hash}') {
+      },
+    };
+    if (path === '/photos') ops.post.requestBody = imageUpload;
+    if (path === '/me/avatar') ops.put.requestBody = imageUpload;
+    if (path.startsWith('/files/')) {
+      const types = path.endsWith('/thumb') ? ['image/jpeg'] : ['image/jpeg', 'image/png', 'image/webp'];
       ops.get.responses = {
         200: {
           description: 'The image',
-          content: Object.fromEntries(
-            ['image/jpeg', 'image/png', 'image/webp'].map((t) => [t, { schema: { type: 'string', format: 'binary' } }]),
-          ),
+          content: Object.fromEntries(types.map((t) => [t, { schema: { type: 'string', format: 'binary' } }])),
         },
         ...ops.get.responses,
       };
       delete ops.get.responses['204'];
     }
   }
+
+  // OpenAPI 3.0 needs a `type` next to `nullable`; nullable references come out as { nullable, allOf: [$ref] }.
+  const fixNullable = (node: unknown): void => {
+    if (Array.isArray(node)) return node.forEach(fixNullable);
+    if (!node || typeof node !== 'object') return;
+    const n = node as Json;
+    if (n.nullable === true && !n.type && Array.isArray(n.allOf)) n.type = 'object';
+    Object.values(n).forEach(fixNullable);
+  };
+  fixNullable(doc);
 
   // Drop component schemas no operation reaches (the type provider also emits unused *Input variants).
   const schemas: Json = doc.components.schemas;

@@ -1,125 +1,186 @@
 import { z } from 'zod';
 import type { App, Ctx } from '../app.js';
+import { view } from '../app.js';
 import { CATEGORIES, CRITERIA, monthStart, type CriterionKey } from '../domain.js';
 import { HttpError, notFound } from '../errors.js';
+import { decodeCursor, page, pagingQuery } from '../paging.js';
 import { releaseFiles } from '../photo-store.js';
-import { queryPlaces, toPlaceSummary } from '../places-query.js';
+import { placeAuthor, requireOwnerOrAdmin } from '../place-access.js';
+import { PLACE_SORTS, queryPlaces, toPhoto, toPlaceSummary } from '../places-query.js';
+import { toProfile, type ProfileJson } from '../profiles.js';
+import { attachRatingPhotos, awardGoldStar, ratingBody } from '../rating-logic.js';
 import { ErrorBody, PlaceDetail, PlaceList, SavedResult } from '../schemas.js';
+import { selectComments, toComment } from './comments.js';
 import { starsLeft } from './me.js';
 
 const hhmm = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'expected HH:MM');
 
 const placeFields = {
   name: z.string().trim().min(1).max(120),
-  category: z.enum(CATEGORIES),
-  priceLevel: z.number().int().min(1).max(4).nullable(),
+  category_id: z.enum(CATEGORIES),
+  status: z.enum(['active', 'temporarily_closed', 'closed']),
+  price_level: z.number().int().min(1).max(4).nullable(),
   address: z.string().trim().max(200).nullable(),
   location: z.object({ lat: z.number().min(-90).max(90), lng: z.number().min(-180).max(180) }),
-  description: z.string().trim().max(2000).nullable(),
+  description: z.string().trim().max(500).nullable(),
   tags: z.array(z.string().trim().min(1).max(30)).max(10),
-  openingHours: z
+  opening_hours: z
     .array(z.object({ day: z.number().int().min(0).max(6), open: hhmm, close: hhmm }))
     .max(21)
     .nullable(),
-  googlePlaceId: z.string().max(200).nullable(),
+  google_place_id: z.string().max(200).nullable(),
 };
 
 const createPlace = z.object({
-  ...placeFields,
-  priceLevel: placeFields.priceLevel.default(null),
+  name: placeFields.name,
+  category_id: placeFields.category_id,
+  location: placeFields.location,
+  status: placeFields.status.default('active'),
+  price_level: placeFields.price_level.default(null),
   address: placeFields.address.default(null),
   description: placeFields.description.default(null),
   tags: placeFields.tags.default([]),
-  openingHours: placeFields.openingHours.default(null),
-  googlePlaceId: placeFields.googlePlaceId.default(null),
+  opening_hours: placeFields.opening_hours.default(null),
+  google_place_id: placeFields.google_place_id.default(null),
+  rating: ratingBody.omit({ photo_ids: true }).meta({ description: "The author's own rating, required" }),
+  photo_ids: z
+    .array(z.uuid())
+    .min(1)
+    .meta({ description: 'Photos uploaded with POST /photos; at least one (every rating has a photo)' }),
+  gold_star: z.boolean().default(false).meta({ description: 'Also give it a gold star (uses this month’s quota)' }),
 });
 
-const updatePlace = z.object(placeFields).partial();
+const updatePlace = z.object(placeFields).omit({ location: true }).partial().extend({
+  location: placeFields.location.optional(),
+});
 
 const idParams = z.object({ id: z.uuid() });
 
-const listQuery = z
+/** Comma-separated list in a query string. */
+const csv = <T extends z.ZodType>(item: T) =>
+  z
+    .string()
+    .optional()
+    .transform((s, c) => {
+      if (!s) return undefined;
+      const parsed = z.array(item).safeParse(s.split(',').map((x) => x.trim()));
+      if (!parsed.success) {
+        c.addIssue({ code: 'custom', message: parsed.error.issues.map((i) => i.message).join('; ') });
+        return z.NEVER;
+      }
+      return parsed.data as z.output<T>[];
+    });
+
+const flag = z
+  .enum(['true', 'false'])
+  .optional()
+  .transform((v) => v === 'true');
+
+const bbox = z
+  .string()
+  .optional()
+  .meta({ description: 'Map viewport: minLng,minLat,maxLng,maxLat', example: '20.9,52.15,21.15,52.3' })
+  .transform((s, c) => {
+    if (s == null) return undefined;
+    const n = s.split(',').map(Number);
+    const [minLng, minLat, maxLng, maxLat] = n as [number, number, number, number];
+    const ok =
+      n.length === 4 &&
+      n.every(Number.isFinite) &&
+      minLng >= -180 &&
+      maxLng <= 180 &&
+      minLat >= -90 &&
+      maxLat <= 90 &&
+      minLng < maxLng &&
+      minLat < maxLat;
+    if (!ok) {
+      c.addIssue({ code: 'custom', message: 'bbox must be minLng,minLat,maxLng,maxLat' });
+      return z.NEVER;
+    }
+    return { minLng, minLat, maxLng, maxLat };
+  });
+
+const searchQuery = z
   .object({
-    q: z.string().max(100).optional(),
-    category: z
+    q: z
       .string()
+      .max(100)
       .optional()
-      .transform((s) => (s ? s.split(',').map((c) => c.trim()) : undefined))
-      .pipe(z.array(z.enum(CATEGORIES)).optional()),
+      .meta({ description: 'Name, description, address or tags; ignores case and Polish accents' }),
+    categories: csv(z.enum(CATEGORIES)).meta({ description: 'Comma-separated, any of them' }),
+    min_rating: z.coerce.number().min(0).max(5).optional(),
+    gold_only: flag,
+    tags: csv(z.string().min(1)).meta({ description: 'Comma-separated, at least one of them' }),
+    prices: csv(z.coerce.number().int().min(1).max(4)).meta({ description: 'Comma-separated price levels' }),
     lat: z.coerce.number().min(-90).max(90).optional(),
     lng: z.coerce.number().min(-180).max(180).optional(),
-    maxDistanceKm: z.coerce.number().positive().optional(),
-    bbox: z
-      .string()
-      .optional()
-      .meta({ description: 'Map viewport: minLng,minLat,maxLng,maxLat', example: '20.9,52.15,21.15,52.3' })
-      .transform((s, c) => {
-        if (s == null) return undefined;
-        const n = s.split(',').map(Number);
-        const [minLng, minLat, maxLng, maxLat] = n as [number, number, number, number];
-        const ok =
-          n.length === 4 &&
-          n.every(Number.isFinite) &&
-          minLng >= -180 &&
-          maxLng <= 180 &&
-          minLat >= -90 &&
-          maxLat <= 90 &&
-          minLng < maxLng &&
-          minLat < maxLat;
-        if (!ok) {
-          c.addIssue({ code: 'custom', message: 'bbox must be minLng,minLat,maxLng,maxLat' });
-          return z.NEVER;
-        }
-        return { minLng, minLat, maxLng, maxLat };
-      }),
-    sort: z.enum(['best', 'stars', 'near', 'newest']).default('best'),
-    limit: z.coerce.number().int().min(1).max(500).default(20),
-    offset: z.coerce.number().int().min(0).default(0),
+    radius_m: z.coerce.number().positive().max(100_000).optional(),
+    bbox,
+    added_by: z.uuid().optional(),
+    unrated_only: flag.meta({ description: 'Places I have not rated' }),
+    saved_only: flag,
+    include_closed: flag.meta({ description: 'Closed places are hidden unless this is true' }),
+    sort: z.enum(PLACE_SORTS).default('best'),
+    ...pagingQuery(500),
   })
   .refine((q) => (q.lat == null) === (q.lng == null), { message: 'lat and lng go together' })
-  .refine((q) => q.lat != null || (q.sort !== 'near' && q.maxDistanceKm == null), {
-    message: 'sort=near and maxDistanceKm need lat and lng',
+  .refine((q) => q.lat != null || (q.sort !== 'nearest' && q.radius_m == null), {
+    message: 'sort=nearest and radius_m need lat and lng',
   });
 
 const nearQuery = z
   .object({ lat: z.coerce.number().min(-90).max(90).optional(), lng: z.coerce.number().min(-180).max(180).optional() })
   .refine((q) => (q.lat == null) === (q.lng == null), { message: 'lat and lng go together' });
 
-/** Ensures the place exists and returns its author. */
-export async function placeAuthor(ctx: Ctx, placeId: string): Promise<string> {
-  const [place] = await ctx.sql<{ added_by: string }[]>`select added_by from places where id = ${placeId}`;
-  if (!place) throw notFound('Place');
-  return place.added_by;
-}
-
 export async function loadPlace(ctx: Ctx, placeId: string, userId: string, near?: { lat: number; lng: number }) {
   const { sql, config } = ctx;
-  const now = ctx.now();
-  const month = monthStart(now, config.TIME_ZONE);
-  const [row] = await queryPlaces(sql, { userId, month, ids: [placeId], near });
+  const v = view(ctx);
+  const month = monthStart(v.now, config.TIME_ZONE);
+  const [row] = await queryPlaces(sql, {
+    userId,
+    month,
+    starRankBonus: await ctx.settings.get('starRankBonus'),
+    ids: [placeId],
+    near,
+  });
   if (!row) throw notFound('Place');
 
-  const [[extra], photos, [criteria], [mine], [myStar]] = await Promise.all([
-    sql<{ description: string | null; google_place_id: string | null; updated_at: Date; comments: number }[]>`
-      select description, google_place_id, updated_at,
-             (select count(*)::int from comments c where c.place_id = p.id) as comments
-      from places p where id = ${placeId}
-    `,
+  const [[extra], photos, [criteria], distribution, [mine], awarders, [myStar], comments, left] = await Promise.all([
+    sql<{ google_place_id: string | null }[]>`select google_place_id from places where id = ${placeId}`,
     sql<
-      { id: string; hash: string }[]
-    >`select id, hash from place_photos where place_id = ${placeId} order by created_at, id`,
+      {
+        id: string;
+        hash: string;
+        blurhash: string | null;
+        width: number | null;
+        height: number | null;
+        uploaded_by: string;
+      }[]
+    >`
+      select id, hash, blurhash, width, height, uploaded_by from place_photos
+      where place_id = ${placeId} order by created_at, id
+    `,
     sql<Record<string, number | null>[]>`
       select avg(vibe)::numeric(3, 2) as vibe, avg(offer)::numeric(3, 2) as offer,
              avg(service)::numeric(3, 2) as service, avg(value)::numeric(3, 2) as value,
              count(service)::int as service_count, count(value)::int as value_count
       from ratings where place_id = ${placeId}
     `,
-    sql<
-      { vibe: number; offer: number; service: number | null; value: number | null; overall: number; updated_at: Date }[]
-    >`
-      select vibe, offer, service, value, overall, updated_at from ratings where place_id = ${placeId} and user_id = ${userId}
+    sql<{ stars: number; n: number }[]>`
+      select round(overall)::int as stars, count(*)::int as n from ratings where place_id = ${placeId} group by 1
     `,
-    sql`select 1 from stars where place_id = ${placeId} and user_id = ${userId} and month = ${month}::date`,
+    sql<{ vibe: number; offer: number; service: number | null; value: number | null }[]>`
+      select vibe, offer, service, value from ratings where place_id = ${placeId} and user_id = ${userId}
+    `,
+    sql<{ profile: ProfileJson }[]>`
+      select profile_json(u) as profile from stars s join users u on u.id = s.user_id
+      where s.place_id = ${placeId} order by s.created_at desc
+    `,
+    sql<{ created_at: Date }[]>`
+      select created_at from stars where place_id = ${placeId} and user_id = ${userId} and month = ${month}::date
+    `,
+    selectComments(ctx, { placeId }),
+    starsLeft(ctx, userId, month),
   ]);
 
   const breakdown = CRITERIA.map((c) => ({
@@ -130,25 +191,24 @@ export async function loadPlace(ctx: Ctx, placeId: string, userId: string, near?
   const strongest = breakdown
     .filter((c) => c.average != null)
     .reduce<(typeof breakdown)[number] | null>((best, c) => (!best || c.average! > best.average! ? c : best), null);
+  const dist = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
+  for (const d of distribution) dist[d.stars as 1 | 2 | 3 | 4 | 5] = d.n;
 
   return {
-    ...toPlaceSummary(row, config.TIME_ZONE, now),
-    description: extra!.description,
-    googlePlaceId: extra!.google_place_id,
-    openingHours: row.opening_hours,
-    photos: photos.map((p) => ({ id: p.id, url: `/photos/${p.hash}` })),
+    ...toPlaceSummary(row, v),
+    google_place_id: extra!.google_place_id,
+    opening_hours: row.opening_hours,
+    photos: photos.map((p) => ({ ...toPhoto(p, ctx.urls), uploaded_by: p.uploaded_by })),
     criteria: breakdown,
-    strongestCriterion: (strongest?.key ?? null) as CriterionKey | null,
-    commentsCount: extra!.comments,
-    myRating: mine
-      ? {
-          scores: { vibe: mine.vibe, offer: mine.offer, service: mine.service, value: mine.value },
-          overall: mine.overall,
-          updatedAt: mine.updated_at.toISOString(),
-        }
-      : null,
-    myStar: { givenThisMonth: !!myStar, left: await starsLeft(ctx, userId, month) },
-    updatedAt: extra!.updated_at.toISOString(),
+    strongest_criterion: (strongest?.key ?? null) as CriterionKey | null,
+    rating_distribution: dist,
+    my_scores: mine ?? null,
+    gold_star_awarders: awarders.map((a) => toProfile(a.profile, ctx.urls)),
+    my_gold_star: myStar ? { awarded_at: myStar.created_at.toISOString() } : null,
+    can_revoke_gold_star: !!myStar,
+    gold_stars_left: left,
+    comments: comments.map((c) => toComment(ctx, c, userId)),
+    is_mine: row.author.id === userId,
   };
 }
 
@@ -161,31 +221,46 @@ export function placeRoutes(app: App, ctx: Ctx) {
       preHandler: ctx.auth,
       schema: {
         tags: ['Places'],
-        summary: 'Discover places',
+        summary: 'Search places',
         description:
-          'Search (`q` matches name, address and tags), filter and sort. `sort=best` ranks by rating pulled towards ' +
-          'the network average with the weight of 3 ratings; `stars` by golden stars this month; `near` by distance. ' +
-          'For the map, pass `bbox` (the visible area) with a `limit` of up to 500.',
-        querystring: listQuery,
+          'Search, filter and sort. `best` ranks by rank_score (rating pulled towards the network average with ' +
+          'the weight of 3 ratings, plus a bonus per gold star); `gold_stars` by all-time gold stars; `nearest` ' +
+          'by distance; `newest`; `most_commented`. Ties are broken stably. Closed places are hidden unless ' +
+          '`include_closed=true`. For the map, pass `bbox` (the visible area) with a `limit` of up to 500.',
+        querystring: searchQuery,
         response: { 200: PlaceList },
       },
     },
     async (req) => {
-      const { q, category, lat, lng, maxDistanceKm, bbox, sort, limit, offset } = req.query;
-      const now = ctx.now();
+      const qs = req.query;
+      const offset = decodeCursor(qs.cursor);
       const rows = await queryPlaces(sql, {
         userId: req.user.id,
-        month: monthStart(now, config.TIME_ZONE),
-        q,
-        categories: category,
-        near: lat != null && lng != null ? { lat, lng } : undefined,
-        maxDistanceKm,
-        bbox,
-        sort,
-        limit,
+        month: monthStart(ctx.now(), config.TIME_ZONE),
+        starRankBonus: await ctx.settings.get('starRankBonus'),
+        q: qs.q,
+        categories: qs.categories,
+        minRating: qs.min_rating,
+        goldOnly: qs.gold_only,
+        tags: qs.tags,
+        prices: qs.prices,
+        near: qs.lat != null && qs.lng != null ? { lat: qs.lat, lng: qs.lng } : undefined,
+        radiusM: qs.radius_m,
+        bbox: qs.bbox,
+        addedBy: qs.added_by,
+        unratedOnly: qs.unrated_only,
+        savedOnly: qs.saved_only,
+        includeClosed: qs.include_closed,
+        sort: qs.sort,
+        limit: qs.limit,
         offset,
       });
-      return { total: rows[0]?.total ?? 0, items: rows.map((r) => toPlaceSummary(r, config.TIME_ZONE, now)) };
+      const v = view(ctx);
+      return page(
+        rows.map((r) => toPlaceSummary(r, v)),
+        offset,
+        rows[0]?.total ?? 0,
+      );
     },
   );
 
@@ -196,28 +271,44 @@ export function placeRoutes(app: App, ctx: Ctx) {
       schema: {
         tags: ['Places'],
         summary: 'Add a place',
-        description: '409 `place_exists` (with `placeId`) when a place with the same `googlePlaceId` is already there.',
+        description:
+          'Adds the place together with the author’s rating and its photos (and optionally a gold star) in one ' +
+          'transaction. Upload the photos first with `POST /photos`. 409 `place_exists` (with `place_id`) when a ' +
+          'place with the same `google_place_id` is already there.',
         body: createPlace,
         response: { 201: PlaceDetail, 409: ErrorBody },
       },
     },
     async (req, reply) => {
       const b = req.body;
-      if (b.googlePlaceId) {
-        const [existing] = await sql`select id from places where google_place_id = ${b.googlePlaceId}`;
-        if (existing) {
-          return reply.status(409).send({
-            error: { code: 'place_exists', message: 'This place is already on the map', placeId: existing.id },
-          });
+      const id = await sql.begin(async (tx) => {
+        if (b.google_place_id) {
+          const [existing] = await tx<
+            { id: string }[]
+          >`select id from places where google_place_id = ${b.google_place_id}`;
+          if (existing) {
+            throw new HttpError(409, 'place_exists', 'This place is already on the map', { place_id: existing.id });
+          }
         }
-      }
-      const [created] = await sql<{ id: string }[]>`
-      insert into places (name, category, price_level, address, lat, lng, description, tags, opening_hours, google_place_id, added_by)
-      values (${b.name}, ${b.category}, ${b.priceLevel}, ${b.address}, ${b.location.lat}, ${b.location.lng},
-              ${b.description}, ${b.tags}, ${b.openingHours ? sql.json(b.openingHours) : null}, ${b.googlePlaceId}, ${req.user.id})
-      returning id
-    `;
-      return reply.status(201).send(await loadPlace(ctx, created!.id, req.user.id));
+        const [created] = await tx<{ id: string }[]>`
+          insert into places (name, category, status, price_level, address, lat, lng, description, tags,
+                              opening_hours, google_place_id, added_by)
+          values (${b.name}, ${b.category_id}, ${b.status}, ${b.price_level}, ${b.address}, ${b.location.lat},
+                  ${b.location.lng}, ${b.description}, ${b.tags}, ${b.opening_hours ? tx.json(b.opening_hours) : null},
+                  ${b.google_place_id}, ${req.user.id})
+          returning id
+        `;
+        const placeId = created!.id;
+        const r = b.rating;
+        await tx`
+          insert into ratings (user_id, place_id, vibe, offer, service, value)
+          values (${req.user.id}, ${placeId}, ${r.vibe}, ${r.offer}, ${r.service}, ${r.value})
+        `;
+        await attachRatingPhotos(tx, ctx, placeId, req.user.id, b.photo_ids);
+        if (b.gold_star) await awardGoldStar(tx, ctx, placeId, req.user.id);
+        return placeId;
+      });
+      return reply.status(201).send(await loadPlace(ctx, id, req.user.id));
     },
   );
 
@@ -228,7 +319,7 @@ export function placeRoutes(app: App, ctx: Ctx) {
       schema: {
         tags: ['Places'],
         summary: 'Place details',
-        description: 'Pass `lat`/`lng` to get `distanceKm`.',
+        description: 'Pass `lat`/`lng` to get `distance_m`. Includes photos, comments and gold star givers.',
         params: idParams,
         querystring: nearQuery,
         response: { 200: PlaceDetail },
@@ -247,27 +338,26 @@ export function placeRoutes(app: App, ctx: Ctx) {
       schema: {
         tags: ['Places'],
         summary: 'Edit a place',
-        description: 'Only the person who added the place. Send just the fields to change.',
+        description: 'The person who added it, or an admin. Send just the fields to change.',
         params: idParams,
         body: updatePlace,
         response: { 200: PlaceDetail },
       },
     },
     async (req) => {
-      if ((await placeAuthor(ctx, req.params.id)) !== req.user.id) {
-        throw new HttpError(403, 'forbidden', 'Only the person who added the place can edit it');
-      }
+      requireOwnerOrAdmin(req.user, await placeAuthor(ctx, req.params.id), 'edit this place');
       const b = req.body;
       const set: Record<string, unknown> = {};
       if (b.name !== undefined) set.name = b.name;
-      if (b.category !== undefined) set.category = b.category;
-      if (b.priceLevel !== undefined) set.price_level = b.priceLevel;
+      if (b.category_id !== undefined) set.category = b.category_id;
+      if (b.status !== undefined) set.status = b.status;
+      if (b.price_level !== undefined) set.price_level = b.price_level;
       if (b.address !== undefined) set.address = b.address;
       if (b.location !== undefined) Object.assign(set, { lat: b.location.lat, lng: b.location.lng });
       if (b.description !== undefined) set.description = b.description;
       if (b.tags !== undefined) set.tags = b.tags;
-      if (b.openingHours !== undefined) set.opening_hours = b.openingHours ? sql.json(b.openingHours) : null;
-      if (b.googlePlaceId !== undefined) set.google_place_id = b.googlePlaceId;
+      if (b.opening_hours !== undefined) set.opening_hours = b.opening_hours ? sql.json(b.opening_hours) : null;
+      if (b.google_place_id !== undefined) set.google_place_id = b.google_place_id;
       if (Object.keys(set).length) {
         await sql`update places set ${sql(set)}, updated_at = now() where id = ${req.params.id}`;
       }
@@ -282,14 +372,14 @@ export function placeRoutes(app: App, ctx: Ctx) {
       schema: {
         tags: ['Places'],
         summary: 'Delete a place',
-        description: 'Only the person who added it. Removes its ratings, stars, comments and photos.',
+        description:
+          'The person who added it, or an admin. Removes its ratings, photos, gold stars and comments. To mark a ' +
+          'place that no longer exists, set `status` to `closed` instead.',
         params: idParams,
       },
     },
     async (req, reply) => {
-      if ((await placeAuthor(ctx, req.params.id)) !== req.user.id) {
-        throw new HttpError(403, 'forbidden', 'Only the person who added the place can delete it');
-      }
+      requireOwnerOrAdmin(req.user, await placeAuthor(ctx, req.params.id), 'delete this place');
       await sql.begin(async (tx) => {
         const photos = await tx<{ hash: string }[]>`select hash from place_photos where place_id = ${req.params.id}`;
         await tx`delete from places where id = ${req.params.id}`;
@@ -315,11 +405,11 @@ export function placeRoutes(app: App, ctx: Ctx) {
     await sql`
       insert into saved_places (user_id, place_id) values (${req.user.id}, ${req.params.id}) on conflict do nothing
     `;
-    return { saved: true };
+    return { is_saved: true };
   });
 
   app.delete('/places/:id/saved', { preHandler: ctx.auth, schema: savedSchema('Unsave a place') }, async (req) => {
     await sql`delete from saved_places where user_id = ${req.user.id} and place_id = ${req.params.id}`;
-    return { saved: false };
+    return { is_saved: false };
   });
 }
