@@ -45,6 +45,9 @@ export interface PlaceRow {
   lng: number;
   tags: string[];
   opening_hours: OpeningPeriod[] | null;
+  card_layout: 'auto' | 'a' | 'b' | 'c';
+  photo_filter: 'none' | 'duotone' | 'halftone' | 'engraving' | 'riso';
+  filter_intensity: number;
   created_at: Date;
   updated_at: Date;
   author: ProfileJson;
@@ -120,7 +123,7 @@ export async function queryPlaces(sql: Sql, q: PlaceQuery): Promise<PlaceRow[]> 
     )
     select
       p.id, p.name, p.category, p.status, p.price_level, p.address, p.description, p.lat, p.lng, p.tags,
-      p.opening_hours, p.created_at, p.updated_at,
+      p.opening_hours, p.created_at, p.updated_at, p.card_layout, p.photo_filter, p.filter_intensity,
       profile_json(u) as author,
       p.rating_avg, p.rating_count, p.gold_star_count, p.gold_stars_this_month, p.comment_count, p.rank_score,
       cover.id as cover_id, cover.hash as cover_hash, cover.blurhash as cover_blurhash,
@@ -205,6 +208,7 @@ export function toPlaceSummary(row: PlaceRow, ctx: { timeZone: string; now: Date
     author: toProfile(row.author, ctx.urls),
     my_rating: row.my_rating,
     is_saved: row.is_saved,
+    card_style: { layout: row.card_layout, photo_filter: row.photo_filter, filter_intensity: row.filter_intensity },
     created_at: row.created_at.toISOString(),
     updated_at: row.updated_at.toISOString(),
   };
