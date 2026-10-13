@@ -92,6 +92,8 @@ Environment variables (see `.env.example`):
 | `PHOTO_DIR` | `./data/photos` | Where photo files are stored (a volume in production) |
 | `TIME_ZONE` | `Europe/Warsaw` | Month boundaries for gold stars, weeks in stats, "open now" |
 | `CORS_ORIGINS` | none | Only needed for a browser client on another origin |
+| `APNS_KEY` · `APNS_KEY_ID` · `APNS_TEAM_ID` | – | Push notifications: the APNs auth key (.p8 contents; `\n` escapes accepted), its key id and the Apple team id. Without them nothing is sent |
+| `APNS_APP_IDS` | any | Bundle ids devices may register with (the APNs topics), e.g. `pl.dobremleko.app,pl.dobremleko.app.dev` |
 | `DEV_LOGIN` | `false` | Enables `POST /auth/dev` (ignored when `NODE_ENV=production`) |
 | `PORT` · `NODE_ENV` | `8080` · `development` | |
 
@@ -173,6 +175,24 @@ same path, so a new pictogram needs no app release. A path is the `d` attribute 
 grid, at most 8000 characters. Migration 008 seeded the pictograms the iOS app drew (plate, cup, cocktail, notes,
 teddy, palette, pine, ball, bag, bed, beer mug, museum, pool, eye, shapes) and added `brewery` (Pivovar), `museum`,
 `pool` (Basen) and `curiosity` (Osobliwość) before `other`.
+
+### Push notifications
+
+The apps register their device token with `PUT /me/devices` (token, platform, APNs environment — `sandbox` for
+development-signed builds, `production` for TestFlight and the App Store — and the bundle id, the APNs topic) and
+remove it with `DELETE /me/devices/{token}` on sign-out. People choose what they get in `PATCH /me`
+(`notifications`): new places — `all`, `favorites` (only in their favourite categories; the default) or `none` —
+and comments (on places they added, commented on or saved; on by default).
+
+- **New place:** to people with its category among their favourites, or who want all new places; not its author.
+- **New comment:** to the place's author, others who commented on it and those who saved it; not the commenter.
+- **Admins** (`/admin/push`): who gets notifications on which devices, a message to everyone, to chosen people
+  or by favourite category (optionally opening a place), and the log of everything sent (`/admin/push/log`).
+
+Event notifications are sent after the response. Tokens APNs rejects for good (`Unregistered`, `BadDeviceToken`)
+are forgotten. The payload is `{ aps: { alert: { title, body }, sound }, place_id }`. Android (FCM) devices can be
+registered but are not sent to yet. Apple setup: enable *Push Notifications* on the app ids, create an APNs key
+(Keys → Apple Push Notifications service) and set `APNS_KEY`, `APNS_KEY_ID` and `APNS_TEAM_ID`.
 
 ### Places and search
 
@@ -298,6 +318,8 @@ strategy because the photo volume is mounted by one pod at a time, so a deploy h
 Repository secrets: `VPS_HOST`, `VPS_SSH_KEY`, `POSTGRES_PASSWORD` (letters and digits only, it goes into a URL:
 `openssl rand -hex 24`), `JWT_SECRET` (`openssl rand -base64 48`), `ADMIN_EMAILS`.
 Repository variables: `API_HOST` (the API's domain), `GOOGLE_CLIENT_IDS`, `GOOGLE_WEB_CLIENT_ID`.
+Push notifications: secret `APNS_KEY` (the .p8 file's contents), variables `APNS_KEY_ID`, `APNS_TEAM_ID`,
+`APNS_APP_IDS`.
 
 The whitelist and settings are managed at `https://<WEB_HOST>/admin/` (see dobre-mleko-web). Changing `ADMIN_EMAILS` needs the secret
 edited and the "Build and deploy" workflow re-run. After the first run, make the GHCR package public or add an

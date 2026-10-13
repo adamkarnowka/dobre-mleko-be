@@ -101,6 +101,15 @@ spec:
               valueFrom: { secretKeyRef: { name: dobre-mleko, key: GOOGLE_CLIENT_IDS } }
             - name: GOOGLE_WEB_CLIENT_ID
               valueFrom: { secretKeyRef: { name: dobre-mleko, key: GOOGLE_WEB_CLIENT_ID } }
+            # Push notifications (APNs); empty values turn them off.
+            - name: APNS_KEY
+              valueFrom: { secretKeyRef: { name: dobre-mleko, key: APNS_KEY } }
+            - name: APNS_KEY_ID
+              valueFrom: { secretKeyRef: { name: dobre-mleko, key: APNS_KEY_ID } }
+            - name: APNS_TEAM_ID
+              valueFrom: { secretKeyRef: { name: dobre-mleko, key: APNS_TEAM_ID } }
+            - name: APNS_APP_IDS
+              valueFrom: { secretKeyRef: { name: dobre-mleko, key: APNS_APP_IDS } }
             - { name: PHOTO_DIR, value: /data/photos }
             # Unique per workflow run, so re-running the deploy after changing secrets restarts the pod.
             - { name: DEPLOY_ID, value: DEPLOY_ID_PLACEHOLDER }

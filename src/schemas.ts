@@ -39,8 +39,18 @@ export const GoldStarQuota = z
   })
   .meta({ id: 'GoldStarQuota' });
 
+export const NotificationPrefs = z
+  .object({
+    new_places: z.enum(['all', 'favorites', 'none']).meta({
+      description: 'New places: all of them, only in my favourite categories (default), or none',
+    }),
+    comments: z.boolean().meta({ description: 'Comments on places I added, commented on or saved' }),
+  })
+  .meta({ id: 'NotificationPrefs', description: 'What push notifications I get.' });
+
 export const Me = Profile.extend({
   email: z.string(),
+  notifications: NotificationPrefs,
   is_admin: z.boolean().meta({ description: 'Can use the /admin endpoints (the admin dashboard of the web app)' }),
   has_profile: z.boolean().meta({ description: 'false until POST /me/profile; the app shows onboarding' }),
   gold_stars: GoldStarQuota,
@@ -357,3 +367,51 @@ export const AdminIcon = CategoryIcon.extend({
 export const AdminIconList = z.object({ items: z.array(AdminIcon) }).meta({ id: 'AdminIconList' });
 
 export const AdminCategoryList = z.object({ items: z.array(AdminCategory) }).meta({ id: 'AdminCategoryList' });
+
+export const Device = z
+  .object({
+    platform: z.enum(['ios', 'android']),
+    environment: z.enum(['sandbox', 'production']),
+    app_id: z.string().meta({ description: 'Bundle id / package name' }),
+    created_at: isoDate,
+    last_seen_at: isoDate,
+  })
+  .meta({ id: 'Device' });
+
+export const PushCounts = z
+  .object({
+    recipients: z.number().int().meta({ description: 'People chosen' }),
+    devices: z.number().int().meta({ description: 'Their devices' }),
+    delivered: z.number().int().meta({ description: 'Accepted by APNs' }),
+    failed: z.number().int().meta({ description: 'Not delivered (also every device when push is not configured)' }),
+  })
+  .meta({ id: 'PushCounts' });
+
+export const PushSubscriber = z
+  .object({
+    profile: Profile,
+    email: z.string(),
+    notifications: NotificationPrefs,
+    devices: z.array(Device),
+  })
+  .meta({ id: 'PushSubscriber', description: 'A member and the devices they get notifications on.' });
+
+export const PushOverview = z
+  .object({
+    configured: z.boolean().meta({ description: 'APNs credentials are set; without them nothing is sent' }),
+    members: z.array(PushSubscriber).meta({ description: 'Every active member, with or without devices' }),
+  })
+  .meta({ id: 'PushOverview' });
+
+export const PushLogEntry = PushCounts.extend({
+  id: z.uuid(),
+  created_at: isoDate,
+  kind: z.enum(['new_place', 'new_comment', 'admin']),
+  title: z.string(),
+  body: z.string(),
+  place_id: z.uuid().nullable(),
+  audience: z.record(z.string(), z.unknown()),
+  sent_by: z.object({ id: z.uuid(), display_name: z.string() }).nullable(),
+}).meta({ id: 'PushLogEntry' });
+
+export const PushLog = z.object({ items: z.array(PushLogEntry) }).meta({ id: 'PushLog' });
