@@ -48,6 +48,9 @@ export async function loadMe(ctx: Ctx, userId: string) {
   };
 }
 
+/** Shown instead of the name of someone who deleted their account (PRODUCT_SPEC: „Były członek”). */
+const DELETED_NAME = 'Były członek';
+
 const displayName = z.string().trim().min(1).max(60);
 // Trimmed; an empty badge clears it.
 const badge = z
@@ -130,6 +133,43 @@ export function meRoutes(app: App, ctx: Ctx) {
       if (b.notifications?.comments !== undefined) set.notify_comments = b.notifications.comments;
       if (Object.keys(set).length) await sql`update users set ${sql(set)} where id = ${req.user.id}`;
       return loadMe(ctx, req.user.id);
+    },
+  );
+
+  app.delete(
+    '/me',
+    {
+      preHandler: ctx.auth,
+      schema: {
+        tags: ['Me'],
+        summary: 'Delete my account',
+        description:
+          'Removes the personal data: e-mail, name, badge, avatar, Google/Apple ids, favourite categories, saved ' +
+          'places, devices and the place on the access list. Places, ratings, photos and comments stay, shown as ' +
+          'by "Były członek" (status `deleted`). Every session ends. Signing in again with the same e-mail starts ' +
+          'a new account, once an admin puts it back on the list. ADMIN_EMAILS admins stay on the list.',
+      },
+    },
+    async (req, reply) => {
+      await sql.begin(async (tx) => {
+        const [user] = await tx<{ email: string; avatar_hash: string | null }[]>`
+          select email, avatar_hash from users where id = ${req.user.id} for update
+        `;
+        await tx`
+          update users set
+            status = 'deleted', name = ${DELETED_NAME}, email = ${`deleted-${req.user.id}@deleted.invalid`},
+            google_sub = null, apple_sub = null, avatar_hash = null, avatar_url = null, badge = null,
+            favorite_categories = '{}', notify_new_places = 'none', notify_comments = false
+          where id = ${req.user.id}
+        `;
+        await tx`delete from saved_places where user_id = ${req.user.id}`;
+        await tx`delete from devices where user_id = ${req.user.id}`;
+        if (!ctx.config.ADMIN_EMAILS.includes(user!.email)) {
+          await tx`delete from allowed_emails where email = ${user!.email}`;
+        }
+        if (user!.avatar_hash) await releaseFiles(tx, ctx.photos, [user!.avatar_hash]);
+      });
+      return reply.status(204).send();
     },
   );
 

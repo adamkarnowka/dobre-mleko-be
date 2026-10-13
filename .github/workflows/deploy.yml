@@ -56,6 +56,7 @@ jobs:
           ADMIN_EMAILS: ${{ secrets.ADMIN_EMAILS }}
           GOOGLE_CLIENT_IDS: ${{ vars.GOOGLE_CLIENT_IDS }}
           GOOGLE_WEB_CLIENT_ID: ${{ vars.GOOGLE_WEB_CLIENT_ID }}
+          APPLE_CLIENT_IDS: ${{ vars.APPLE_CLIENT_IDS }}
           APNS_KEY: ${{ secrets.APNS_KEY }}
           APNS_KEY_ID: ${{ vars.APNS_KEY_ID }}
           APNS_TEAM_ID: ${{ vars.APNS_TEAM_ID }}
@@ -72,6 +73,7 @@ jobs:
               --from-literal=ADMIN_EMAILS="$ADMIN_EMAILS" \
               --from-literal=GOOGLE_CLIENT_IDS="$GOOGLE_CLIENT_IDS" \
               --from-literal=GOOGLE_WEB_CLIENT_ID="$GOOGLE_WEB_CLIENT_ID" \
+              --from-literal=APPLE_CLIENT_IDS="$APPLE_CLIENT_IDS" \
               --from-literal=APNS_KEY="$APNS_KEY" \
               --from-literal=APNS_KEY_ID="$APNS_KEY_ID" \
               --from-literal=APNS_TEAM_ID="$APNS_TEAM_ID" \
