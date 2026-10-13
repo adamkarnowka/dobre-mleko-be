@@ -32,6 +32,13 @@ const schema = z.object({
   // Directory (a persistent volume in production) where photo files are stored.
   PHOTO_DIR: z.string().default('./data/photos'),
   CORS_ORIGINS: csv,
+  // Apple Push Notification service: the .p8 key (PEM, `\n` escapes accepted), its key id and the team id.
+  // Without them push notifications are off (devices are still registered).
+  APNS_KEY: z.string().default(''),
+  APNS_KEY_ID: z.string().trim().default(''),
+  APNS_TEAM_ID: z.string().trim().default(''),
+  // App ids (bundle ids) devices may register with — the APNs topics. Empty: any.
+  APNS_APP_IDS: csv,
 });
 
 export type Config = z.infer<typeof schema>;

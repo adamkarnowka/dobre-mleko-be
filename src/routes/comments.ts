@@ -5,6 +5,7 @@ import { decodeCursor, page, pagingQuery } from '../paging.js';
 import { placeAuthor, requireOwnerOrAdmin } from '../place-access.js';
 import { toProfile, type ProfileJson } from '../profiles.js';
 import { Comment, CommentList } from '../schemas.js';
+import { notifyComment } from '../notifications.js';
 
 interface CommentRow {
   id: string;
@@ -108,6 +109,7 @@ export function commentRoutes(app: App, ctx: Ctx) {
         insert into comments (place_id, user_id, body) values (${req.params.id}, ${req.user.id}, ${req.body.body})
         returning id
       `;
+      notifyComment(ctx, req.params.id, req.user.id, req.body.body);
       return reply.status(201).send(await loadComment(created!.id, req.user.id));
     },
   );

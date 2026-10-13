@@ -8,7 +8,7 @@ import { decodeCursor, page, pagingQuery } from '../paging.js';
 import { lockHash, releaseFiles } from '../photo-store.js';
 import { queryPlaces, toPlaceSummary } from '../places-query.js';
 import { toProfile, type ProfileJson } from '../profiles.js';
-import { GoldStarQuota, Me, MyRatingList, PlaceList } from '../schemas.js';
+import { GoldStarQuota, Me, MyRatingList, NotificationPrefs, PlaceList } from '../schemas.js';
 import { readImageUpload, storeImage } from '../uploads.js';
 
 export async function starsLeft(ctx: Ctx, userId: string, month: string): Promise<number> {
@@ -24,8 +24,17 @@ export async function goldStarQuota(ctx: Ctx, userId: string) {
 }
 
 export async function loadMe(ctx: Ctx, userId: string) {
-  const [user] = await ctx.sql<{ profile: ProfileJson; email: string; profile_completed_at: Date | null }[]>`
-    select profile_json(u) as profile, u.email, u.profile_completed_at from users u where u.id = ${userId}
+  const [user] = await ctx.sql<
+    {
+      profile: ProfileJson;
+      email: string;
+      profile_completed_at: Date | null;
+      notify_new_places: 'all' | 'favorites' | 'none';
+      notify_comments: boolean;
+    }[]
+  >`
+    select profile_json(u) as profile, u.email, u.profile_completed_at, u.notify_new_places, u.notify_comments
+    from users u where u.id = ${userId}
   `;
   if (!user) throw notFound('User');
   const profile = toProfile(user.profile, ctx.urls);
@@ -34,6 +43,7 @@ export async function loadMe(ctx: Ctx, userId: string) {
     email: user.email,
     is_admin: profile.role === 'admin',
     has_profile: !!user.profile_completed_at,
+    notifications: { new_places: user.notify_new_places, comments: user.notify_comments },
     gold_stars: await goldStarQuota(ctx, userId),
   };
 }
@@ -102,6 +112,7 @@ export function meRoutes(app: App, ctx: Ctx) {
           display_name: displayName.optional(),
           badge: badge.optional(),
           favorite_categories: favoriteCategories.optional(),
+          notifications: NotificationPrefs.partial().optional(),
         }),
         response: { 200: Me },
       },
@@ -115,6 +126,8 @@ export function meRoutes(app: App, ctx: Ctx) {
         await requireCategories(sql, b.favorite_categories);
         set.favorite_categories = b.favorite_categories;
       }
+      if (b.notifications?.new_places !== undefined) set.notify_new_places = b.notifications.new_places;
+      if (b.notifications?.comments !== undefined) set.notify_comments = b.notifications.comments;
       if (Object.keys(set).length) await sql`update users set ${sql(set)} where id = ${req.user.id}`;
       return loadMe(ctx, req.user.id);
     },

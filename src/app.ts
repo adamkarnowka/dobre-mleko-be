@@ -26,6 +26,7 @@ import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
 import { categoryRoutes } from './routes/categories.js';
 import { iconRoutes } from './routes/icons.js';
+import { pushRoutes } from './routes/push.js';
 import { commentRoutes } from './routes/comments.js';
 import { meRoutes } from './routes/me.js';
 import { metaRoutes } from './routes/meta.js';
@@ -35,6 +36,7 @@ import { ratingRoutes } from './routes/ratings.js';
 import { statsRoutes } from './routes/stats.js';
 import { ErrorBody } from './schemas.js';
 import { PHOTO_BYTES_CEILING, Settings } from './settings.js';
+import { ApnsSender, DisabledPushSender, Notifier, type PushSender } from './push.js';
 
 export interface AppDeps {
   config: Config;
@@ -44,6 +46,8 @@ export interface AppDeps {
   logger?: boolean;
   /** How long settings are cached (default 10 s). */
   settingsCacheMs?: number;
+  /** Push sender (tests); by default APNs when configured. */
+  pushSender?: PushSender;
 }
 
 export interface Ctx {
@@ -59,6 +63,8 @@ export interface Ctx {
   photos: PhotoStore;
   /** Signs photo and avatar URLs. */
   urls: FileUrls;
+  /** Push notifications to people's devices. */
+  notifier: Notifier;
   now: () => Date;
 }
 
@@ -72,6 +78,12 @@ export type App = FastifyInstance<
   FastifyBaseLogger,
   ZodTypeProvider
 >;
+
+/** APNs when the key, key id and team id are set; otherwise push notifications are off. */
+function pushSender(config: Config): PushSender {
+  if (!config.APNS_KEY || !config.APNS_KEY_ID || !config.APNS_TEAM_ID) return new DisabledPushSender();
+  return new ApnsSender({ key: config.APNS_KEY, keyId: config.APNS_KEY_ID, teamId: config.APNS_TEAM_ID });
+}
 
 export async function buildApp(deps: AppDeps) {
   const { config, sql } = deps;
@@ -143,8 +155,15 @@ export async function buildApp(deps: AppDeps) {
     settings: new Settings(sql, deps.settingsCacheMs),
     photos: new PhotoStore(config.PHOTO_DIR),
     urls: new FileUrls(config.JWT_SECRET, now),
+    notifier: new Notifier(sql, deps.pushSender ?? pushSender(config), (error) =>
+      app.log.error({ err: error }, 'push notification failed'),
+    ),
     now,
   };
+  app.addHook('onClose', async () => {
+    await ctx.notifier.settle();
+    ctx.notifier.sender.close();
+  });
 
   // Every documented route shares the error shape; signed-in routes are marked as needing the bearer token.
   app.addHook('onRoute', (route) => {
@@ -171,6 +190,7 @@ export async function buildApp(deps: AppDeps) {
     adminRoutes,
     categoryRoutes,
     iconRoutes,
+    pushRoutes,
   ]) {
     routes(app, ctx);
   }

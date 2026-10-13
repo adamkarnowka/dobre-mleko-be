@@ -6,6 +6,7 @@ import { CRITERIA, monthStart, type CriterionKey } from '../domain.js';
 import { HttpError, notFound } from '../errors.js';
 import { decodeCursor, page, pagingQuery } from '../paging.js';
 import { releaseFiles } from '../photo-store.js';
+import { notifyNewPlace } from '../notifications.js';
 import { placeAuthor, requireOwnerOrAdmin } from '../place-access.js';
 import { PLACE_SORTS, queryPlaces, toPhoto, toPlaceSummary } from '../places-query.js';
 import { toProfile, type ProfileJson } from '../profiles.js';
@@ -315,6 +316,7 @@ export function placeRoutes(app: App, ctx: Ctx) {
         if (b.gold_star) await awardGoldStar(tx, ctx, placeId, req.user.id);
         return placeId;
       });
+      notifyNewPlace(ctx, id, req.user.id);
       return reply.status(201).send(await loadPlace(ctx, id, req.user.id));
     },
   );

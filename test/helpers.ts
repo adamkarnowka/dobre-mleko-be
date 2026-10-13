@@ -8,6 +8,7 @@ import { ensureAdmins, type GoogleIdentity } from '../src/auth.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { createDb, migrate, type Sql } from '../src/db.js';
 import { HttpError } from '../src/errors.js';
+import type { PushMessage, PushResult, PushSender, PushTarget } from '../src/push.js';
 
 export const DATABASE_URL = process.env.TEST_DATABASE_URL ?? 'postgres://mleko:mleko@localhost:5432/mleko_test';
 
@@ -45,6 +46,20 @@ export async function fakeGoogle(idToken: string): Promise<GoogleIdentity> {
 
 export type TestApp = Awaited<ReturnType<typeof buildApp>>;
 
+/** Records push notifications instead of calling APNs; tokens in `gone` are reported as no longer valid. */
+export class FakePushSender implements PushSender {
+  configured = true;
+  sent: { token: string; title: string; body: string; placeId?: string | null }[] = [];
+  gone = new Set<string>();
+  async send(target: PushTarget, message: PushMessage): Promise<PushResult> {
+    this.sent.push({ token: target.token, ...message });
+    return this.gone.has(target.token) ? 'gone' : 'delivered';
+  }
+  close(): void {}
+}
+
+export const pushes = new FakePushSender();
+
 export interface Harness {
   sql: Sql;
   app: TestApp;
@@ -73,13 +88,16 @@ export function setup(): Harness {
         verifyGoogle: fakeGoogle,
         now: () => h.clock.now,
         settingsCacheMs: 0,
+        pushSender: pushes,
       });
     h.app = await h.build();
   });
 
   beforeEach(async () => {
     h.clock.now = new Date('2026-10-11T12:00:00Z');
-    await h.sql`truncate users, places, place_photos, ratings, stars, comments, saved_places, allowed_emails, settings, categories, icons cascade`;
+    await h.sql`truncate users, places, place_photos, ratings, stars, comments, saved_places, allowed_emails, settings, categories, icons, push_log cascade`;
+    pushes.sent = [];
+    pushes.gone.clear();
     await h.sql`insert into icons ${h.sql(defaultIcons)}`;
     await h.sql`insert into categories ${h.sql(defaultCategories)}`;
     rmSync(PHOTO_DIR, { recursive: true, force: true });
