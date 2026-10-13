@@ -54,6 +54,7 @@ export interface Harness {
 
 /** The categories migration 007 creates, restored before each test. */
 let defaultCategories: Record<string, unknown>[] = [];
+let defaultIcons: Record<string, unknown>[] = [];
 
 /** Fresh schema per test file, tables truncated before each test (categories reset to the defaults). */
 export function setup(): Harness {
@@ -63,6 +64,7 @@ export function setup(): Harness {
     h.sql = createDb(DATABASE_URL);
     await h.sql.unsafe('drop schema public cascade; create schema public;');
     await migrate(h.sql);
+    defaultIcons = await h.sql`select * from icons`;
     defaultCategories = await h.sql`select * from categories`;
     h.build = (overrides = {}) =>
       buildApp({
@@ -77,7 +79,8 @@ export function setup(): Harness {
 
   beforeEach(async () => {
     h.clock.now = new Date('2026-10-11T12:00:00Z');
-    await h.sql`truncate users, places, place_photos, ratings, stars, comments, saved_places, allowed_emails, settings, categories cascade`;
+    await h.sql`truncate users, places, place_photos, ratings, stars, comments, saved_places, allowed_emails, settings, categories, icons cascade`;
+    await h.sql`insert into icons ${h.sql(defaultIcons)}`;
     await h.sql`insert into categories ${h.sql(defaultCategories)}`;
     rmSync(PHOTO_DIR, { recursive: true, force: true });
     await ensureAdmins(h.sql, [ADMIN]);

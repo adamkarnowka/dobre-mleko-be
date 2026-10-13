@@ -23,18 +23,30 @@ describe('categories in /meta', () => {
       'sport',
       'shopping',
       'hotel',
+      'brewery',
+      'museum',
+      'pool',
+      'curiosity',
       'other',
     ]);
-    expect(m.category_details).toHaveLength(11);
+    expect(m.category_details).toHaveLength(15);
     expect(m.category_details[0]).toEqual({
       id: 'food',
       label: 'Jedzenie',
       color: '#D7301F',
       shape: 'circle',
+      icon: { id: 'plate', path: expect.stringMatching(/^M/) },
       position: 1,
       active: true,
     });
-    expect(m.category_details.find((c: { id: string }) => c.id === 'hotel').shape).toBe('house');
+    expect(m.category_details.find((c: { id: string }) => c.id === 'hotel')).toMatchObject({
+      shape: 'house',
+      icon: { id: 'bed' },
+    });
+    expect(m.category_details.find((c: { id: string }) => c.id === 'curiosity')).toMatchObject({
+      label: 'Osobliwość',
+      icon: { id: 'eye' },
+    });
   });
 });
 
@@ -53,7 +65,8 @@ describe('managing categories', () => {
     expect(res.json()).toMatchObject({
       ...sauna,
       color: '#1E8A8A',
-      position: 12,
+      icon: null,
+      position: 16,
       active: true,
       places: 0,
       updated_by: { display_name: expect.any(String) },

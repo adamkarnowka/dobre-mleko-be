@@ -243,6 +243,17 @@ export const MyStats = z
   })
   .meta({ id: 'MyStats' });
 
+export const CategoryIcon = z
+  .object({
+    id: z.string().meta({ description: 'Icon id in the library' }),
+    path: z.string().meta({
+      description:
+        'SVG path data (`d`) on a 24×24 grid (`viewBox="0 0 24 24"`), filled with the even-odd rule in the ' +
+        "category's colour (holes are separate subpaths). Commands M L H V C S Q T A Z, absolute or relative.",
+    }),
+  })
+  .meta({ id: 'CategoryIcon', description: "A category's pictogram, managed by admins in the icon library." });
+
 export const Category = z
   .object({
     id: z.string().meta({ description: 'Stable id, used as `category_id` everywhere' }),
@@ -253,8 +264,9 @@ export const Category = z
         'The category mark, drawn in `color` in a 44×44 box: `circle` (full circle), `half` (upper half disc ' +
         'sitting on the bottom edge), `triangle` (apex up), `triangle_down` (apex down), `ring` (circle in ' +
         '`color` with a 2 pt ink outline), `square`, `quarter` (quarter disc, square corner at bottom right), ' +
-        '`house` (pentagon: square with a roof, eaves at 18/44).',
+        '`house` (pentagon: square with a roof, eaves at 18/44). Drawn when the category has no icon.',
     }),
+    icon: CategoryIcon.nullable().meta({ description: 'The pictogram; null — draw `shape`' }),
     position: z.number().int().meta({ description: 'Display order, ascending' }),
     active: z.boolean().meta({
       description: 'False when retired: existing places keep it (still draw it), but do not offer it for new ones',
@@ -334,5 +346,14 @@ export const AdminCategory = Category.extend({
   updated_at: isoDate,
   updated_by: z.object({ id: z.uuid(), display_name: z.string() }).nullable(),
 }).meta({ id: 'AdminCategory' });
+
+export const AdminIcon = CategoryIcon.extend({
+  label: z.string().meta({ description: 'Polish name, e.g. in the icon picker' }),
+  categories: z.number().int().meta({ description: 'Categories using this icon' }),
+  updated_at: isoDate,
+  updated_by: z.object({ id: z.uuid(), display_name: z.string() }).nullable(),
+}).meta({ id: 'AdminIcon' });
+
+export const AdminIconList = z.object({ items: z.array(AdminIcon) }).meta({ id: 'AdminIconList' });
 
 export const AdminCategoryList = z.object({ items: z.array(AdminCategory) }).meta({ id: 'AdminCategoryList' });

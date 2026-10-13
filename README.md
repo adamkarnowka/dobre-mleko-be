@@ -135,7 +135,7 @@ and `cursor` and return `{ items, next_cursor, total }`. Errors are `{"error": "
 | Photos | `POST /photos` (upload), `DELETE /photos/{id}`, `GET /files/{hash}[/thumb]?exp&sig` (signed) |
 | Stats | `GET /stats/network`, `GET /stats/me` |
 | Meta | `GET /meta`: categories (`category_details`), rating criteria, limits, sign-in options |
-| Admin | `GET\|POST /admin/allowed`, `PATCH\|DELETE /admin/allowed/{email}`, `GET /admin/settings`, `PUT\|DELETE /admin/settings/{key}`, `GET\|POST /admin/categories`, `PATCH\|DELETE /admin/categories/{id}`, `PUT /admin/categories/order` |
+| Admin | `GET\|POST /admin/allowed`, `PATCH\|DELETE /admin/allowed/{email}`, `GET /admin/settings`, `PUT\|DELETE /admin/settings/{key}`, `GET\|POST /admin/categories`, `PATCH\|DELETE /admin/categories/{id}`, `PUT /admin/categories/order`, `GET\|POST /admin/icons`, `PATCH\|DELETE /admin/icons/{id}` |
 
 ### Sign-in and profiles
 
@@ -153,7 +153,9 @@ or suspending them applies to existing sessions immediately. Their content stays
 Categories are data, managed by admins in the dashboard (`/admin/categories`), and every client reads them from
 `GET /meta`: `category_details` lists each one with its id, Polish `label`, `color` (`#RRGGBB`), `shape` (one of
 `circle half triangle triangle_down ring square quarter house`; the geometry is in the OpenAPI `Category` schema),
-`position` and `active`. Draw a category's mark from these instead of building categories into the app. Places
+`icon` (the pictogram: `{ id, path }` — SVG path data on a 24×24 grid, filled even-odd in the category's colour;
+null — draw the shape), `position` and `active`. Draw a category's mark from these instead of building categories
+into the app. Places
 refer to a category by id, which never changes; `categories` in `/meta` (active ids, in order) stays for older
 clients.
 
@@ -161,6 +163,16 @@ A retired category (`active: false`) keeps its places, which still need drawing,
 (422 when a place is added to it or moved into it). A category can be deleted only while no place uses it; it then
 also leaves people's favourite categories. One category always stays active. Migration 007 created the first
 eleven: `food coffee bar club kids culture nature sport shopping hotel other`.
+
+### Icons
+
+Pictograms are data too: an icon library (`/admin/icons`: id, Polish name, SVG path) that admins add to, change and
+delete from (only icons no category uses; 409 `icon_in_use`), and categories point at an icon. Every app draws the
+same path, so a new pictogram needs no app release. A path is the `d` attribute of a `<path>` in a
+`viewBox="0 0 24 24"` SVG: commands `M L H V C S Q T A Z` and numbers only (no markup), absolute points within the
+grid, at most 8000 characters. Migration 008 seeded the pictograms the iOS app drew (plate, cup, cocktail, notes,
+teddy, palette, pine, ball, bag, bed, beer mug, museum, pool, eye, shapes) and added `brewery` (Pivovar), `museum`,
+`pool` (Basen) and `curiosity` (Osobliwość) before `other`.
 
 ### Places and search
 
