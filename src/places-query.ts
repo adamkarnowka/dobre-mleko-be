@@ -71,7 +71,7 @@ export interface PlaceRow {
 }
 
 /** Escapes LIKE wildcards in user input. */
-const likeEscape = (s: string) => s.replace(/[\\%_]/g, (c) => '\\' + c);
+export const likeEscape = (s: string) => s.replace(/[\\%_]/g, (c) => '\\' + c);
 
 /**
  * Place cards with their aggregates: the one query behind search, the map, saved places and top lists.

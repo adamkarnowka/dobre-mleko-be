@@ -415,3 +415,15 @@ export const PushLogEntry = PushCounts.extend({
 }).meta({ id: 'PushLogEntry' });
 
 export const PushLog = z.object({ items: z.array(PushLogEntry) }).meta({ id: 'PushLog' });
+
+export const TagList = z
+  .object({
+    items: z.array(
+      z.object({
+        tag: z.string().meta({ description: 'As most places spell it' }),
+        places: z.number().int().meta({ description: 'Places with this tag' }),
+        in_category: z.number().int().meta({ description: 'Of them, places in `category` (0 without it)' }),
+      }),
+    ),
+  })
+  .meta({ id: 'TagList' });

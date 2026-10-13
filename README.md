@@ -131,7 +131,7 @@ and `cursor` and return `{ items, next_cursor, total }`. Errors are `{"error": "
 |---|---|
 | Sign-in | `POST /auth/google {id_token}` → `{token, expires_at, has_profile, user}`; `POST /auth/dev` (development) |
 | Me | `GET /me`, `POST /me/profile` (onboarding), `PATCH /me`, `PUT\|DELETE /me/avatar`, `GET /me/gold-stars`, `GET /me/saved`, `GET /me/ratings` |
-| Places | `GET /places` (search), `POST /places`, `GET\|PATCH\|DELETE /places/{id}`, `PUT\|DELETE /places/{id}/saved` |
+| Places | `GET /places` (search), `POST /places`, `GET\|PATCH\|DELETE /places/{id}`, `PUT\|DELETE /places/{id}/saved`, `GET /tags` (tag suggestions) |
 | Ratings | `PUT\|DELETE /places/{id}/rating`, `POST\|DELETE /places/{id}/gold-star` |
 | Comments | `GET\|POST /places/{id}/comments`, `PATCH\|DELETE /comments/{id}` |
 | Photos | `POST /photos` (upload), `DELETE /photos/{id}`, `GET /files/{hash}[/thumb]?exp&sig` (signed) |
@@ -304,7 +304,7 @@ Where this API differs from the iOS handoff, pending decisions with Adam:
 - **Photos:** at most `maxPhotosPerRating` per rating instead of 6 per place, since every rating has a photo.
 - **Sign-in** is Google only (no Apple or magic link); `not_authenticated` (401) is an extra error code.
 - **`lat`/`lng`** are optional in search.
-- **Not built yet:** reports, duplicate check, tag list, member list and profiles, suspension controls, account
+- **Not built yet:** reports, duplicate check, member list and profiles, suspension controls, account
   deletion and data export, realtime, push.
 
 ## Deploy

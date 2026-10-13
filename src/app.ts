@@ -30,6 +30,7 @@ import { pushRoutes } from './routes/push.js';
 import { commentRoutes } from './routes/comments.js';
 import { meRoutes } from './routes/me.js';
 import { metaRoutes } from './routes/meta.js';
+import { tagRoutes } from './routes/tags.js';
 import { photoRoutes } from './routes/photos.js';
 import { placeRoutes } from './routes/places.js';
 import { ratingRoutes } from './routes/ratings.js';
@@ -180,6 +181,7 @@ export async function buildApp(deps: AppDeps) {
 
   for (const routes of [
     metaRoutes,
+    tagRoutes,
     authRoutes,
     meRoutes,
     placeRoutes,
