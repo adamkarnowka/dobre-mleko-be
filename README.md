@@ -131,7 +131,7 @@ and `cursor` and return `{ items, next_cursor, total }`. Errors are `{"error": "
 | Area | Endpoints |
 |---|---|
 | Sign-in | `POST /auth/google {id_token}`, `POST /auth/apple {id_token, name?}` → `{token, expires_at, has_profile, user}`; `POST /auth/dev` (development) |
-| Me | `GET /me`, `POST /me/profile` (onboarding), `PATCH /me`, `PUT\|DELETE /me/avatar`, `GET /me/gold-stars`, `GET /me/saved`, `GET /me/ratings` |
+| Me | `GET /me`, `POST /me/profile` (onboarding), `PATCH\|DELETE /me`, `PUT\|DELETE /me/avatar`, `GET /me/gold-stars`, `GET /me/saved`, `GET /me/ratings` |
 | Places | `GET /places` (search), `POST /places`, `GET\|PATCH\|DELETE /places/{id}`, `PUT\|DELETE /places/{id}/saved`, `GET /tags` (tag suggestions) |
 | Ratings | `PUT\|DELETE /places/{id}/rating`, `POST\|DELETE /places/{id}/gold-star` |
 | Comments | `GET\|POST /places/{id}/comments`, `PATCH\|DELETE /comments/{id}` |
@@ -150,6 +150,10 @@ account, later tokens without an e-mail find it by the Apple id, and a Hide My E
 list gets 403 `private_email`. While `has_profile` is false the app
 shows onboarding and finishes it with `POST /me/profile`: display name, badge (up to 16 characters; empty clears
 it) and up to 3 favourite categories. Profiles shown to others never include the e-mail.
+
+`DELETE /me` deletes the account (App Store requirement): the personal data goes (e-mail, name, badge, avatar,
+Google/Apple ids, favourites, saved places, devices, the access-list entry), places, ratings, photos and comments
+stay, shown as by "Były członek" (status `deleted`).
 
 Every request re-checks the whitelist, the role and the account status, so removing someone, changing their role
 or suspending them applies to existing sessions immediately. Their content stays.
@@ -308,8 +312,7 @@ Where this API differs from the iOS handoff, pending decisions with Adam:
 - **Photos:** at most `maxPhotosPerRating` per rating instead of 6 per place, since every rating has a photo.
 - **Sign-in** is Google and Apple (no magic link); `not_authenticated` (401) is an extra error code.
 - **`lat`/`lng`** are optional in search.
-- **Not built yet:** reports, duplicate check, member list and profiles, suspension controls, account
-  deletion and data export, realtime, push.
+- **Not built yet:** reports, duplicate check, member list and profiles, suspension controls, data export, realtime, push.
 
 ## Deploy
 
