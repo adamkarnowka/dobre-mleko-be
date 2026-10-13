@@ -16,7 +16,15 @@ import {
   validatorCompiler,
   type ZodTypeProvider,
 } from 'fastify-type-provider-zod';
-import { createGoogleVerifier, requireAdmin, requireUser, Sessions, type GoogleVerifier } from './auth.js';
+import {
+  createAppleVerifier,
+  createGoogleVerifier,
+  requireAdmin,
+  requireUser,
+  Sessions,
+  type AppleVerifier,
+  type GoogleVerifier,
+} from './auth.js';
 import type { Config } from './config.js';
 import type { Sql } from './db.js';
 import { HttpError } from './errors.js';
@@ -43,6 +51,7 @@ export interface AppDeps {
   config: Config;
   sql: Sql;
   verifyGoogle?: GoogleVerifier;
+  verifyApple?: AppleVerifier;
   now?: () => Date;
   logger?: boolean;
   /** How long settings are cached (default 10 s). */
@@ -56,6 +65,7 @@ export interface Ctx {
   sql: Sql;
   sessions: Sessions;
   verifyGoogle: GoogleVerifier;
+  verifyApple: AppleVerifier;
   /** Signed-in and whitelisted. */
   auth: preHandlerHookHandler;
   /** Signed-in, whitelisted admin. */
@@ -151,6 +161,9 @@ export async function buildApp(deps: AppDeps) {
     verifyGoogle:
       deps.verifyGoogle ??
       createGoogleVerifier([...config.GOOGLE_CLIENT_IDS, config.GOOGLE_WEB_CLIENT_ID].filter(Boolean)),
+    verifyApple:
+      deps.verifyApple ??
+      createAppleVerifier(config.APPLE_CLIENT_IDS.length ? config.APPLE_CLIENT_IDS : config.APNS_APP_IDS),
     auth,
     admin: requireAdmin(auth),
     settings: new Settings(sql, deps.settingsCacheMs),

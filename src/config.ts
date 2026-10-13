@@ -21,6 +21,8 @@ const schema = z.object({
   GOOGLE_CLIENT_IDS: csv,
   // OAuth client ID of type "Web application", used by the web app's and admin dashboard's Google sign-in button.
   GOOGLE_WEB_CLIENT_ID: z.string().trim().default(''),
+  // Bundle ids of the iOS apps whose Sign in with Apple identity tokens we accept. Empty: APNS_APP_IDS.
+  APPLE_CLIENT_IDS: csv,
   // Secret for signing our own session tokens. At least 32 characters.
   JWT_SECRET: z.string().min(32),
   // Enables POST /auth/dev for local development. Never honoured in production.

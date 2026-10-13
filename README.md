@@ -88,6 +88,7 @@ Environment variables (see `.env.example`):
 | `JWT_SECRET` | – | At least 32 characters; signs session tokens and photo URLs |
 | `ADMIN_EMAILS` | – | Comma-separated admins. Always whitelisted as admins (re-applied at every start) and cannot be removed or demoted in the dashboard, so nobody can lock everyone out |
 | `GOOGLE_CLIENT_IDS` | – | OAuth client IDs of the mobile apps whose Google ID tokens are accepted |
+| `APPLE_CLIENT_IDS` | `APNS_APP_IDS` | iOS bundle ids whose Sign in with Apple identity tokens are accepted |
 | `GOOGLE_WEB_CLIENT_ID` | – | OAuth client ID of type "Web application" for the web app's and admin dashboard's sign-in button (authorised JavaScript origin: `https://<WEB_HOST>`, the web app's domain) |
 | `PHOTO_DIR` | `./data/photos` | Where photo files are stored (a volume in production) |
 | `TIME_ZONE` | `Europe/Warsaw` | Month boundaries for gold stars, weeks in stats, "open now" |
@@ -129,7 +130,7 @@ and `cursor` and return `{ items, next_cursor, total }`. Errors are `{"error": "
 
 | Area | Endpoints |
 |---|---|
-| Sign-in | `POST /auth/google {id_token}` → `{token, expires_at, has_profile, user}`; `POST /auth/dev` (development) |
+| Sign-in | `POST /auth/google {id_token}`, `POST /auth/apple {id_token, name?}` → `{token, expires_at, has_profile, user}`; `POST /auth/dev` (development) |
 | Me | `GET /me`, `POST /me/profile` (onboarding), `PATCH /me`, `PUT\|DELETE /me/avatar`, `GET /me/gold-stars`, `GET /me/saved`, `GET /me/ratings` |
 | Places | `GET /places` (search), `POST /places`, `GET\|PATCH\|DELETE /places/{id}`, `PUT\|DELETE /places/{id}/saved`, `GET /tags` (tag suggestions) |
 | Ratings | `PUT\|DELETE /places/{id}/rating`, `POST\|DELETE /places/{id}/gold-star` |
@@ -143,7 +144,10 @@ and `cursor` and return `{ items, next_cursor, total }`. Errors are `{"error": "
 
 The app signs in with Google and sends the ID token to `POST /auth/google`. The server checks the token (audience
 `GOOGLE_CLIENT_IDS` + `GOOGLE_WEB_CLIENT_ID`), that the e-mail is verified and whitelisted, creates the account on
-first sign-in and returns a session token (HS256 JWT, valid `sessionTtlDays`). While `has_profile` is false the app
+first sign-in and returns a session token (HS256 JWT, valid `sessionTtlDays`). On iOS, Sign in with Apple works
+the same through `POST /auth/apple` (audience `APPLE_CLIENT_IDS`, the bundle ids): the same e-mail is the same
+account, later tokens without an e-mail find it by the Apple id, and a Hide My Email address that is not on the
+list gets 403 `private_email`. While `has_profile` is false the app
 shows onboarding and finishes it with `POST /me/profile`: display name, badge (up to 16 characters; empty clears
 it) and up to 3 favourite categories. Profiles shown to others never include the e-mail.
 
@@ -302,7 +306,7 @@ Where this API differs from the iOS handoff, pending decisions with Adam:
 - **Gold stars** are once per place per month and can be taken back during their month (the contract: once per
   place ever, 24-hour revoke window). The error codes are the contract's.
 - **Photos:** at most `maxPhotosPerRating` per rating instead of 6 per place, since every rating has a photo.
-- **Sign-in** is Google only (no Apple or magic link); `not_authenticated` (401) is an extra error code.
+- **Sign-in** is Google and Apple (no magic link); `not_authenticated` (401) is an extra error code.
 - **`lat`/`lng`** are optional in search.
 - **Not built yet:** reports, duplicate check, member list and profiles, suspension controls, account
   deletion and data export, realtime, push.
@@ -317,7 +321,8 @@ strategy because the photo volume is mounted by one pod at a time, so a deploy h
 
 Repository secrets: `VPS_HOST`, `VPS_SSH_KEY`, `POSTGRES_PASSWORD` (letters and digits only, it goes into a URL:
 `openssl rand -hex 24`), `JWT_SECRET` (`openssl rand -base64 48`), `ADMIN_EMAILS`.
-Repository variables: `API_HOST` (the API's domain), `GOOGLE_CLIENT_IDS`, `GOOGLE_WEB_CLIENT_ID`.
+Repository variables: `API_HOST` (the API's domain), `GOOGLE_CLIENT_IDS`, `GOOGLE_WEB_CLIENT_ID`, optionally
+`APPLE_CLIENT_IDS` (defaults to `APNS_APP_IDS`).
 Push notifications: secret `APNS_KEY` (the .p8 file's contents), variables `APNS_KEY_ID`, `APNS_TEAM_ID`,
 `APNS_APP_IDS`.
 

@@ -1,6 +1,6 @@
 import type { FastifyReply, FastifyRequest } from 'fastify';
 import { OAuth2Client } from 'google-auth-library';
-import { SignJWT, jwtVerify } from 'jose';
+import { SignJWT, createRemoteJWKSet, jwtVerify, type JWTVerifyGetKey } from 'jose';
 import type { Config } from './config.js';
 import type { Sql } from './db.js';
 import { HttpError, notAuthorized } from './errors.js';
@@ -34,6 +34,44 @@ export function createGoogleVerifier(clientIds: string[]): GoogleVerifier {
       emailVerified: payload.email_verified === true,
       name: payload.name ?? null,
       picture: payload.picture ?? null,
+    };
+  };
+}
+
+export interface AppleIdentity {
+  sub: string;
+  /** Missing when the person signed in before without sharing it; then the account is found by `sub`. */
+  email: string | null;
+  emailVerified: boolean;
+  /** A Hide My Email relay address (`…@privaterelay.appleid.com`). */
+  privateEmail: boolean;
+}
+
+export type AppleVerifier = (idToken: string) => Promise<AppleIdentity>;
+
+const APPLE_ISSUER = 'https://appleid.apple.com';
+const flag = (v: unknown) => v === true || v === 'true';
+
+/** Checks a Sign in with Apple identity token against Apple's keys; the audience is the app's bundle id. */
+export function createAppleVerifier(
+  clientIds: string[],
+  keys: JWTVerifyGetKey = createRemoteJWKSet(new URL(`${APPLE_ISSUER}/auth/keys`)),
+): AppleVerifier {
+  return async (idToken) => {
+    let payload;
+    try {
+      if (!clientIds.length) throw new Error('no client ids');
+      ({ payload } = await jwtVerify(idToken, keys, { issuer: APPLE_ISSUER, audience: clientIds }));
+    } catch {
+      throw new HttpError(401, 'invalid_apple_token', 'Apple identity token is invalid or expired');
+    }
+    if (!payload.sub) throw new HttpError(401, 'invalid_apple_token', 'Apple identity token has no subject');
+    const email = typeof payload.email === 'string' ? payload.email.toLowerCase() : null;
+    return {
+      sub: payload.sub,
+      email,
+      emailVerified: flag(payload.email_verified),
+      privateEmail: flag(payload.is_private_email),
     };
   };
 }

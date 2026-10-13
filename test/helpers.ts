@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import sharp from 'sharp';
 import { afterAll, beforeAll, beforeEach } from 'vitest';
 import { buildApp } from '../src/app.js';
-import { ensureAdmins, type GoogleIdentity } from '../src/auth.js';
+import { ensureAdmins, type AppleIdentity, type GoogleIdentity } from '../src/auth.js';
 import { loadConfig, type Config } from '../src/config.js';
 import { createDb, migrate, type Sql } from '../src/db.js';
 import { HttpError } from '../src/errors.js';
@@ -42,6 +42,13 @@ export async function fakeGoogle(idToken: string): Promise<GoogleIdentity> {
     name: email.split('@')[0]!.replace(/^./, (c) => c.toUpperCase()),
     picture: null,
   };
+}
+
+/** Fake Apple: "apple:<sub>:<email or empty>[:private|:unverified]". */
+export async function fakeApple(idToken: string): Promise<AppleIdentity> {
+  const [prefix, sub, email, flag] = idToken.split(':');
+  if (prefix !== 'apple' || !sub) throw new HttpError(401, 'invalid_apple_token', 'bad token');
+  return { sub, email: email || null, emailVerified: flag !== 'unverified', privateEmail: flag === 'private' };
 }
 
 export type TestApp = Awaited<ReturnType<typeof buildApp>>;
@@ -86,6 +93,7 @@ export function setup(): Harness {
         config: testConfig(overrides),
         sql: h.sql,
         verifyGoogle: fakeGoogle,
+        verifyApple: fakeApple,
         now: () => h.clock.now,
         settingsCacheMs: 0,
         pushSender: pushes,
