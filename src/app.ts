@@ -25,6 +25,7 @@ import { PhotoStore } from './photo-store.js';
 import { adminRoutes } from './routes/admin.js';
 import { authRoutes } from './routes/auth.js';
 import { categoryRoutes } from './routes/categories.js';
+import { iconRoutes } from './routes/icons.js';
 import { commentRoutes } from './routes/comments.js';
 import { meRoutes } from './routes/me.js';
 import { metaRoutes } from './routes/meta.js';
@@ -169,6 +170,7 @@ export async function buildApp(deps: AppDeps) {
     statsRoutes,
     adminRoutes,
     categoryRoutes,
+    iconRoutes,
   ]) {
     routes(app, ctx);
   }

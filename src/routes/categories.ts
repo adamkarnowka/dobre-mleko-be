@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import type { App, Ctx } from '../app.js';
-import { CATEGORY_ID, HEX_COLOR, SHAPES } from '../categories.js';
+import { CATEGORY_ID, HEX_COLOR, requireIcon, SHAPES } from '../categories.js';
 import { HttpError, invalidInput, notFound } from '../errors.js';
 import { AdminCategory, AdminCategoryList } from '../schemas.js';
 
@@ -10,6 +10,7 @@ const color = z
   .transform((c) => c.toUpperCase())
   .pipe(z.string().regex(HEX_COLOR, 'expected #RRGGBB'));
 const shape = z.enum(SHAPES);
+const icon = z.string().nullable().meta({ description: 'An icon id from the library (/admin/icons); null = none' });
 const idParams = z.object({ id: z.string().regex(CATEGORY_ID) });
 
 interface Row {
@@ -17,6 +18,8 @@ interface Row {
   label: string;
   color: string;
   shape: (typeof SHAPES)[number];
+  icon_id: string | null;
+  icon_path: string | null;
   position: number;
   active: boolean;
   updated_at: Date;
@@ -31,9 +34,10 @@ export function categoryRoutes(app: App, ctx: Ctx) {
 
   const select = (where = sql`true`) => sql<Row[]>`
     select c.id, c.label, c.color, c.shape, c.position, c.active, c.updated_at,
+           i.id as icon_id, i.path as icon_path,
            u.id as user_id, u.name as user_name,
            (select count(*)::int from places p where p.category = c.id) as places
-    from categories c left join users u on u.id = c.updated_by
+    from categories c left join users u on u.id = c.updated_by left join icons i on i.id = c.icon
     where ${where}
     order by c.position, c.id
   `;
@@ -43,6 +47,7 @@ export function categoryRoutes(app: App, ctx: Ctx) {
     label: r.label,
     color: r.color,
     shape: r.shape,
+    icon: r.icon_id ? { id: r.icon_id, path: r.icon_path! } : null,
     position: r.position,
     active: r.active,
     places: r.places,
@@ -93,17 +98,19 @@ export function categoryRoutes(app: App, ctx: Ctx) {
         summary: 'Add a category',
         description:
           'Added at the end of the list, active. The id is permanent (places refer to it): lowercase letters, ' +
-          'digits and `_`, 2–32 characters. 409 `category_exists` when the id or the name is taken.',
-        body: z.object({ id: idParams.shape.id, label, color, shape }),
+          'digits and `_`, 2–32 characters. `icon`: an id from the icon library (optional). 409 `category_exists` ' +
+          'when the id or the name is taken.',
+        body: z.object({ id: idParams.shape.id, label, color, shape, icon: icon.optional() }),
         response: { 201: AdminCategory },
       },
     },
     async (req, reply) => {
       const b = req.body;
       await requireFreeLabel(b.label);
+      await requireIcon(sql, b.icon);
       const [inserted] = await sql`
-        insert into categories (id, label, color, shape, position, updated_by)
-        values (${b.id}, ${b.label}, ${b.color}, ${b.shape},
+        insert into categories (id, label, color, shape, icon, position, updated_by)
+        values (${b.id}, ${b.label}, ${b.color}, ${b.shape}, ${b.icon ?? null},
                 (select coalesce(max(position), 0) + 1 from categories), ${req.user.id})
         on conflict (id) do nothing
         returning id
@@ -121,13 +128,14 @@ export function categoryRoutes(app: App, ctx: Ctx) {
         tags: ['Admin'],
         summary: 'Change a category',
         description:
-          'Name, colour, shape, or `active`: retiring a category keeps its places but stops it being offered ' +
+          'Name, colour, shape, icon (null clears it), or `active`: retiring a category keeps its places but stops it being offered ' +
           'for new ones. 409 `category_exists`, `last_category`.',
         params: idParams,
         body: z.object({
           label: label.optional(),
           color: color.optional(),
           shape: shape.optional(),
+          icon: icon.optional(),
           active: z.boolean().optional(),
         }),
         response: { 200: AdminCategory },
@@ -139,8 +147,10 @@ export function categoryRoutes(app: App, ctx: Ctx) {
       await load(id);
       if (b.label !== undefined) await requireFreeLabel(b.label, id);
       if (b.active === false) await requireAnotherActive(id);
+      await requireIcon(sql, b.icon);
       const set: Record<string, unknown> = {};
-      for (const key of ['label', 'color', 'shape', 'active'] as const) if (b[key] !== undefined) set[key] = b[key];
+      for (const key of ['label', 'color', 'shape', 'icon', 'active'] as const)
+        if (b[key] !== undefined) set[key] = b[key];
       if (Object.keys(set).length) {
         await sql`update categories set ${sql(set)}, updated_at = now(), updated_by = ${req.user.id} where id = ${id}`;
       }
