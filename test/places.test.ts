@@ -320,6 +320,10 @@ describe('card style', () => {
     await patch(kuba, { color: 'teal' });
     expect((await patch(kuba, { filter_intensity: 101 })).statusCode).toBe(422);
     expect((await patch(kuba, { layout: 'd' })).statusCode).toBe(422);
+    const wedge = await patch(kuba, { layout: 'wedge', photo_filter: 'sunset' });
+    expect(wedge.statusCode).toBe(200);
+    expect(wedge.json().card_style).toMatchObject({ layout: 'wedge', photo_filter: 'sunset' });
+    await patch(kuba, { layout: 'c', photo_filter: 'riso' });
 
     const list = await h.app.inject({ method: 'GET', url: '/places', headers: ola.headers });
     const item = list.json().items.find((p: { id: string }) => p.id === id);

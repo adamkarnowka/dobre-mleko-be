@@ -73,8 +73,18 @@ export const PhotoFile = z
 
 export const Location = z.object({ lat: z.number(), lng: z.number() });
 
-export const CARD_LAYOUTS = ['auto', 'a', 'b', 'c'] as const;
-export const PHOTO_FILTERS = ['none', 'duotone', 'halftone', 'engraving', 'riso'] as const;
+export const CARD_LAYOUTS = ['auto', 'a', 'b', 'c', 'diagonal', 'ribbon', 'arch', 'wedge'] as const;
+export const PHOTO_FILTERS = [
+  'none',
+  'duotone',
+  'halftone',
+  'engraving',
+  'riso',
+  'xerox',
+  'hatch',
+  'mosaic',
+  'sunset',
+] as const;
 /** The app's card colours (design tokens `cardColor` in the app repo). */
 export const CARD_COLORS = [
   'red',
@@ -99,7 +109,9 @@ export const CardStyle = z
   .object({
     layout: z.enum(CARD_LAYOUTS).meta({
       description:
-        'List card: a = photo full width, b = poster without photo, c = photo in a circle; auto = app rotates',
+        'List card: a = photo full width, b = poster without photo, c = photo in a circle, ' +
+        'diagonal = photo cut by a coloured triangle, ribbon = poster with a diagonal band, arch = photo in an arch, ' +
+        'wedge = photo in a parallelogram; auto = app rotates a, b, c',
     }),
     photo_filter: z.enum(PHOTO_FILTERS).meta({ description: 'Filter on the list card and the main photo' }),
     filter_intensity: z.number().int().min(0).max(100).meta({ description: 'Filter strength in percent' }),
