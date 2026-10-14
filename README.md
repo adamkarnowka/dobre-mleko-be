@@ -94,7 +94,8 @@ Environment variables (see `.env.example`):
 | `TIME_ZONE` | `Europe/Warsaw` | Month boundaries for gold stars, weeks in stats, "open now" |
 | `CORS_ORIGINS` | none | Only needed for a browser client on another origin |
 | `APNS_KEY` · `APNS_KEY_ID` · `APNS_TEAM_ID` | – | Push notifications: the APNs auth key (.p8 contents; `\n` escapes accepted), its key id and the Apple team id. Without them nothing is sent |
-| `APNS_APP_IDS` | any | Bundle ids devices may register with (the APNs topics), e.g. `pl.dobremleko.app,pl.dobremleko.app.dev` |
+| `APNS_APP_IDS` | any | Bundle ids iOS devices may register with (the APNs topics), e.g. `pl.dobremleko.app,pl.dobremleko.app.dev` |
+| `FCM_SERVICE_ACCOUNT` | – | Android push: the Firebase service account's JSON key file contents. Without it Android devices are registered but not sent to |
 | `DEV_LOGIN` | `false` | Enables `POST /auth/dev` (ignored when `NODE_ENV=production`) |
 | `PORT` · `NODE_ENV` | `8080` · `development` | |
 
@@ -197,10 +198,17 @@ and comments (on places they added, commented on or saved; on by default).
 - **Admins** (`/admin/push`): who gets notifications on which devices, a message to everyone, to chosen people
   or by favourite category (optionally opening a place), and the log of everything sent (`/admin/push/log`).
 
-Event notifications are sent after the response. Tokens APNs rejects for good (`Unregistered`, `BadDeviceToken`)
-are forgotten. The payload is `{ aps: { alert: { title, body }, sound }, place_id }`. Android (FCM) devices can be
-registered but are not sent to yet. Apple setup: enable *Push Notifications* on the app ids, create an APNs key
-(Keys → Apple Push Notifications service) and set `APNS_KEY`, `APNS_KEY_ID` and `APNS_TEAM_ID`.
+Event notifications are sent after the response. iOS devices get them through APNs — the payload is
+`{ aps: { alert: { title, body }, sound }, place_id }` — and Android devices through Firebase Cloud Messaging
+(HTTP v1): a notification message `{ notification: { title, body }, data: { place_id } }`. Tokens rejected for
+good (APNs `Unregistered`, `BadDeviceToken`; FCM `UNREGISTERED`, `SENDER_ID_MISMATCH`) are forgotten.
+
+- **Apple setup:** enable *Push Notifications* on the app ids, create an APNs key (Keys → Apple Push Notifications
+  service) and set `APNS_KEY`, `APNS_KEY_ID` and `APNS_TEAM_ID`.
+- **Firebase setup:** in a Firebase project add the Android apps (`app.dobremleko`, `.dev`, `.staging`) — their
+  `google-services.json` goes to the Android app — and under Project settings → Service accounts generate a private
+  key; its JSON file is `FCM_SERVICE_ACCOUNT`. The account needs the *Firebase Cloud Messaging API Admin* role
+  (the default Firebase Admin SDK account has it).
 
 ### Places and search
 
@@ -327,7 +335,7 @@ Repository secrets: `VPS_HOST`, `VPS_SSH_KEY`, `POSTGRES_PASSWORD` (letters and 
 Repository variables: `API_HOST` (the API's domain), `GOOGLE_CLIENT_IDS`, `GOOGLE_WEB_CLIENT_ID`, optionally
 `APPLE_CLIENT_IDS` (defaults to `APNS_APP_IDS`).
 Push notifications: secret `APNS_KEY` (the .p8 file's contents), variables `APNS_KEY_ID`, `APNS_TEAM_ID`,
-`APNS_APP_IDS`.
+`APNS_APP_IDS`; Android — secret `FCM_SERVICE_ACCOUNT` (the service account's JSON key file).
 
 The whitelist and settings are managed at `https://<WEB_HOST>/admin/` (see dobre-mleko-web). Changing `ADMIN_EMAILS` needs the secret
 edited and the "Build and deploy" workflow re-run. After the first run, make the GHCR package public or add an

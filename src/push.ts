@@ -34,7 +34,15 @@ export interface ApnsCredentials {
   teamId: string;
 }
 
-/** Without APNs credentials (local development, tests). */
+/** Firebase service account (its JSON key file): the project and the account that signs token requests. */
+export interface FcmCredentials {
+  projectId: string;
+  clientEmail: string;
+  /** PEM private key; `\n` escapes are accepted. */
+  privateKey: string;
+}
+
+/** Without credentials for a platform (local development, tests). */
 export class DisabledPushSender implements PushSender {
   readonly configured = false;
   async send(): Promise<PushResult> {
@@ -68,7 +76,7 @@ export class ApnsSender implements PushSender {
   ) {}
 
   async send(target: PushTarget, message: PushMessage): Promise<PushResult> {
-    if (target.platform !== 'ios') return 'failed'; // Android (FCM) is not supported yet.
+    if (target.platform !== 'ios') return 'failed'; // Android: FcmSender.
     const payload = JSON.stringify({
       aps: { alert: { title: message.title, body: message.body }, sound: 'default' },
       ...(message.placeId ? { place_id: message.placeId } : {}),
@@ -140,6 +148,105 @@ export class ApnsSender implements PushSender {
   }
 }
 
+/** Google endpoints (tests point them at a local server). */
+export interface FcmEndpoints {
+  token: string;
+  send: string;
+}
+
+const FCM_ENDPOINTS: FcmEndpoints = {
+  token: 'https://oauth2.googleapis.com/token',
+  send: 'https://fcm.googleapis.com',
+};
+
+/** Error codes FCM gives for tokens that will never work again (app removed, token from another project). */
+const FCM_GONE = new Set(['UNREGISTERED', 'SENDER_ID_MISMATCH']);
+
+/**
+ * Firebase Cloud Messaging (HTTP v1) for Android: an OAuth access token from the service account (a signed JWT
+ * exchanged at Google, refreshed every 50 minutes; Google gives an hour), then one request per device. A
+ * notification message — Android shows it itself in the background (the app's default channel) — with `place_id`
+ * in the data, which the app opens when the notification is tapped.
+ */
+export class FcmSender implements PushSender {
+  readonly configured = true;
+  private access: { value: string; at: number } | null = null;
+
+  constructor(
+    private readonly credentials: FcmCredentials,
+    private readonly now: () => number = Date.now,
+    private readonly endpoints: FcmEndpoints = FCM_ENDPOINTS,
+  ) {}
+
+  async send(target: PushTarget, message: PushMessage): Promise<PushResult> {
+    if (target.platform !== 'android') return 'failed';
+    const body = JSON.stringify({
+      message: {
+        token: target.token,
+        notification: { title: message.title, body: message.body },
+        ...(message.placeId ? { data: { place_id: message.placeId } } : {}),
+        android: { priority: 'HIGH', notification: { sound: 'default' } },
+      },
+    });
+    const res = await fetch(`${this.endpoints.send}/v1/projects/${this.credentials.projectId}/messages:send`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${await this.token()}`, 'content-type': 'application/json' },
+      body,
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (res.ok) return 'delivered';
+    if (res.status === 404) return 'gone';
+    const error = (await res.json().catch(() => null)) as {
+      error?: { details?: { errorCode?: string }[] };
+    } | null;
+    const code = error?.error?.details?.find((d) => d.errorCode)?.errorCode;
+    return code && FCM_GONE.has(code) ? 'gone' : 'failed';
+  }
+
+  close(): void {}
+
+  private async token(): Promise<string> {
+    const at = Math.floor(this.now() / 1000);
+    if (this.access && at - this.access.at < 50 * 60) return this.access.value;
+    const key = await importPKCS8(this.credentials.privateKey.replace(/\\n/g, '\n'), 'RS256');
+    const assertion = await new SignJWT({ scope: 'https://www.googleapis.com/auth/firebase.messaging' })
+      .setProtectedHeader({ alg: 'RS256', typ: 'JWT' })
+      .setIssuer(this.credentials.clientEmail)
+      .setAudience(this.endpoints.token)
+      .setIssuedAt(at)
+      .setExpirationTime(at + 3600)
+      .sign(key);
+    const res = await fetch(this.endpoints.token, {
+      method: 'POST',
+      headers: { 'content-type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({ grant_type: 'urn:ietf:params:oauth:grant-type:jwt-bearer', assertion }),
+      signal: AbortSignal.timeout(10_000),
+    });
+    if (!res.ok) throw new Error(`FCM access token: HTTP ${res.status}`);
+    const { access_token } = (await res.json()) as { access_token: string };
+    this.access = { value: access_token, at };
+    return access_token;
+  }
+}
+
+/** iOS devices through APNs, Android through FCM; a platform without credentials is not sent to. */
+export class PlatformPushSender implements PushSender {
+  constructor(private readonly senders: Record<PushTarget['platform'], PushSender>) {}
+
+  get configured(): boolean {
+    return this.senders.ios.configured || this.senders.android.configured;
+  }
+
+  send(target: PushTarget, message: PushMessage): Promise<PushResult> {
+    return this.senders[target.platform].send(target, message);
+  }
+
+  close(): void {
+    this.senders.ios.close();
+    this.senders.android.close();
+  }
+}
+
 export type PushKind = 'new_place' | 'new_comment' | 'admin';
 
 export interface PushCounts {
@@ -150,8 +257,8 @@ export interface PushCounts {
 }
 
 /**
- * Sends a message to people's devices, forgets tokens APNs rejects for good, and logs what was sent. Event
- * notifications (new place, comment) run in the background so the request does not wait for Apple.
+ * Sends a message to people's devices, forgets tokens APNs or FCM reject for good, and logs what was sent. Event
+ * notifications (new place, comment) run in the background so the request does not wait for Apple or Google.
  */
 export class Notifier {
   private pending = new Set<Promise<unknown>>();
