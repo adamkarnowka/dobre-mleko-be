@@ -61,6 +61,7 @@ jobs:
           APNS_KEY_ID: ${{ vars.APNS_KEY_ID }}
           APNS_TEAM_ID: ${{ vars.APNS_TEAM_ID }}
           APNS_APP_IDS: ${{ vars.APNS_APP_IDS }}
+          FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
         run: |
           # k8s.yaml starts with the Namespace, so apply creates it before the Secret below.
           {
@@ -77,7 +78,8 @@ jobs:
               --from-literal=APNS_KEY="$APNS_KEY" \
               --from-literal=APNS_KEY_ID="$APNS_KEY_ID" \
               --from-literal=APNS_TEAM_ID="$APNS_TEAM_ID" \
-              --from-literal=APNS_APP_IDS="$APNS_APP_IDS"
+              --from-literal=APNS_APP_IDS="$APNS_APP_IDS" \
+              --from-literal=FCM_SERVICE_ACCOUNT="$FCM_SERVICE_ACCOUNT"
           } > rendered.yaml
 
       - name: Deploy to k3s

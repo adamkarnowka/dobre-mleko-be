@@ -10,10 +10,10 @@ const token = z.string().trim().min(16).max(512);
 const device = z.object({
   token: token.meta({ description: 'APNs device token (hex) or FCM registration token' }),
   platform: z.enum(['ios', 'android']),
-  environment: z
-    .enum(['sandbox', 'production'])
-    .meta({ description: 'APNs environment: `sandbox` for development-signed builds, `production` otherwise' }),
-  app_id: z.string().trim().min(1).max(200).meta({ description: 'Bundle id / package name (the APNs topic)' }),
+  environment: z.enum(['sandbox', 'production']).meta({
+    description: 'APNs environment: `sandbox` for development-signed builds, `production` otherwise (Android: ignored)',
+  }),
+  app_id: z.string().trim().min(1).max(200).meta({ description: 'Bundle id / package name (the APNs topic on iOS)' }),
 });
 
 const audience = z
@@ -49,13 +49,14 @@ export function pushRoutes(app: App, ctx: Ctx) {
         summary: 'Register a device for push notifications',
         description:
           'Call after the system gives the app a token (every launch is fine). A token moves to the signed-in ' +
-          'person if someone else used the device before. 422 for an app id the server does not send to.',
+          'person if someone else used the device before. 422 for an iOS app id the server does not send to.',
         body: device,
       },
     },
     async (req, reply) => {
       const b = req.body;
-      if (config.APNS_APP_IDS.length && !config.APNS_APP_IDS.includes(b.app_id.toLowerCase())) {
+      // Only iOS app ids are listed (the APNs topics); an Android token belongs to the Firebase project anyway.
+      if (b.platform === 'ios' && config.APNS_APP_IDS.length && !config.APNS_APP_IDS.includes(b.app_id.toLowerCase())) {
         throw invalidInput(`Unknown app id: ${b.app_id}`);
       }
       await sql`
@@ -93,7 +94,8 @@ export function pushRoutes(app: App, ctx: Ctx) {
       schema: {
         tags: ['Admin'],
         summary: 'Push notifications: who gets them',
-        description: 'Every active member with their notification settings and devices, and whether APNs is set up.',
+        description:
+          'Every active member with their notification settings and devices, and whether APNs or FCM is set up.',
         response: { 200: PushOverview },
       },
     },
@@ -142,7 +144,7 @@ export function pushRoutes(app: App, ctx: Ctx) {
         summary: 'Send a push notification',
         description:
           'To everyone, chosen people, or people with chosen favourite categories — on all their devices. ' +
-          '`place_id` opens that place when tapped. Waits for APNs and returns the counts (all failed when push is ' +
+          '`place_id` opens that place when tapped. Waits for APNs and FCM and returns the counts (all failed when push is ' +
           'not configured).',
         body: z.object({
           audience,

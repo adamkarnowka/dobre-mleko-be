@@ -36,7 +36,7 @@ describe('devices and settings', () => {
     expect(await h.sql`select 1 from devices`).toHaveLength(0);
   });
 
-  it('accepts only the configured app ids', async () => {
+  it('accepts only the configured iOS app ids', async () => {
     const app = await h.build({ APNS_APP_IDS: 'pl.dobremleko.app,pl.dobremleko.app.dev' });
     const ola = await login(app, 'ola@gmail.com');
     const put = (app_id: string) =>
@@ -48,6 +48,14 @@ describe('devices and settings', () => {
       });
     expect((await put('pl.dobremleko.app.dev')).statusCode).toBe(204);
     expect((await put('com.example.other')).statusCode).toBe(422);
+    // The list is for iOS (APNs topics); Android tokens belong to the Firebase project.
+    const android = await app.inject({
+      method: 'PUT',
+      url: '/me/devices',
+      headers: ola.headers,
+      payload: { token: tokenOf('pixel'), platform: 'android', environment: 'production', app_id: 'app.dobremleko' },
+    });
+    expect(android.statusCode).toBe(204);
     await app.close();
   });
 

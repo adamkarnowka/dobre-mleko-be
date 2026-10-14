@@ -113,6 +113,9 @@ spec:
               valueFrom: { secretKeyRef: { name: dobre-mleko, key: APNS_TEAM_ID } }
             - name: APNS_APP_IDS
               valueFrom: { secretKeyRef: { name: dobre-mleko, key: APNS_APP_IDS } }
+            # Push notifications on Android (FCM): the Firebase service account key file; empty turns them off.
+            - name: FCM_SERVICE_ACCOUNT
+              valueFrom: { secretKeyRef: { name: dobre-mleko, key: FCM_SERVICE_ACCOUNT } }
             - { name: PHOTO_DIR, value: /data/photos }
             # Unique per workflow run, so re-running the deploy after changing secrets restarts the pod.
             - { name: DEPLOY_ID, value: DEPLOY_ID_PLACEHOLDER }

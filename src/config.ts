@@ -39,8 +39,11 @@ const schema = z.object({
   APNS_KEY: z.string().default(''),
   APNS_KEY_ID: z.string().trim().default(''),
   APNS_TEAM_ID: z.string().trim().default(''),
-  // App ids (bundle ids) devices may register with — the APNs topics. Empty: any.
+  // App ids (bundle ids) iOS devices may register with — the APNs topics. Empty: any.
   APNS_APP_IDS: csv,
+  // Firebase Cloud Messaging (Android): the service account's JSON key file contents. Without it Android devices
+  // are registered but not sent to.
+  FCM_SERVICE_ACCOUNT: z.string().default(''),
 });
 
 export type Config = z.infer<typeof schema>;

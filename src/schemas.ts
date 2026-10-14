@@ -394,7 +394,7 @@ export const PushCounts = z
   .object({
     recipients: z.number().int().meta({ description: 'People chosen' }),
     devices: z.number().int().meta({ description: 'Their devices' }),
-    delivered: z.number().int().meta({ description: 'Accepted by APNs' }),
+    delivered: z.number().int().meta({ description: 'Accepted by APNs or FCM' }),
     failed: z.number().int().meta({ description: 'Not delivered (also every device when push is not configured)' }),
   })
   .meta({ id: 'PushCounts' });
@@ -410,7 +410,7 @@ export const PushSubscriber = z
 
 export const PushOverview = z
   .object({
-    configured: z.boolean().meta({ description: 'APNs credentials are set; without them nothing is sent' }),
+    configured: z.boolean().meta({ description: 'APNs or FCM credentials are set; without them nothing is sent' }),
     members: z.array(PushSubscriber).meta({ description: 'Every active member, with or without devices' }),
   })
   .meta({ id: 'PushOverview' });

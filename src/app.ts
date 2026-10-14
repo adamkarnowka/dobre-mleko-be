@@ -45,7 +45,15 @@ import { ratingRoutes } from './routes/ratings.js';
 import { statsRoutes } from './routes/stats.js';
 import { ErrorBody } from './schemas.js';
 import { PHOTO_BYTES_CEILING, Settings } from './settings.js';
-import { ApnsSender, DisabledPushSender, Notifier, type PushSender } from './push.js';
+import {
+  ApnsSender,
+  DisabledPushSender,
+  FcmSender,
+  Notifier,
+  PlatformPushSender,
+  type FcmCredentials,
+  type PushSender,
+} from './push.js';
 
 export interface AppDeps {
   config: Config;
@@ -90,10 +98,27 @@ export type App = FastifyInstance<
   ZodTypeProvider
 >;
 
-/** APNs when the key, key id and team id are set; otherwise push notifications are off. */
+/**
+ * APNs for iOS when the key, key id and team id are set, FCM for Android with a service account; a platform
+ * without credentials gets no notifications.
+ */
 function pushSender(config: Config): PushSender {
-  if (!config.APNS_KEY || !config.APNS_KEY_ID || !config.APNS_TEAM_ID) return new DisabledPushSender();
-  return new ApnsSender({ key: config.APNS_KEY, keyId: config.APNS_KEY_ID, teamId: config.APNS_TEAM_ID });
+  const apns =
+    config.APNS_KEY && config.APNS_KEY_ID && config.APNS_TEAM_ID
+      ? new ApnsSender({ key: config.APNS_KEY, keyId: config.APNS_KEY_ID, teamId: config.APNS_TEAM_ID })
+      : new DisabledPushSender();
+  const fcm = fcmCredentials(config.FCM_SERVICE_ACCOUNT);
+  return new PlatformPushSender({ ios: apns, android: fcm ? new FcmSender(fcm) : new DisabledPushSender() });
+}
+
+/** The fields FCM needs from a service account key file; null when it is not set. */
+export function fcmCredentials(json: string): FcmCredentials | null {
+  if (!json.trim()) return null;
+  const key = JSON.parse(json) as { project_id?: string; client_email?: string; private_key?: string };
+  if (!key.project_id || !key.client_email || !key.private_key) {
+    throw new Error('FCM_SERVICE_ACCOUNT: expected project_id, client_email and private_key');
+  }
+  return { projectId: key.project_id, clientEmail: key.client_email, privateKey: key.private_key };
 }
 
 export async function buildApp(deps: AppDeps) {
