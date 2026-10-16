@@ -133,7 +133,7 @@ and `cursor` and return `{ items, next_cursor, total }`. Errors are `{"error": "
 |---|---|
 | Sign-in | `POST /auth/google {id_token}`, `POST /auth/apple {id_token, name?}` → `{token, expires_at, has_profile, user}`; `POST /auth/dev` (development) |
 | Me | `GET /me`, `POST /me/profile` (onboarding), `PATCH\|DELETE /me`, `PUT\|DELETE /me/avatar`, `GET /me/gold-stars`, `GET /me/saved`, `GET /me/ratings` |
-| Places | `GET /places` (search), `POST /places`, `GET\|PATCH\|DELETE /places/{id}`, `PUT\|DELETE /places/{id}/saved`, `GET /tags` (tag suggestions) |
+| Places | `GET /places` (search), `POST /places`, `GET\|PATCH\|DELETE /places/{id}`, `PUT\|DELETE /places/{id}/saved`, `GET /tags` (tag suggestions), `POST /maps-links/resolve` (read a Google Maps link) |
 | Ratings | `PUT\|DELETE /places/{id}/rating`, `POST\|DELETE /places/{id}/gold-star` |
 | Comments | `GET\|POST /places/{id}/comments`, `PATCH\|DELETE /comments/{id}` |
 | Photos | `POST /photos` (upload), `DELETE /photos/{id}`, `GET /files/{hash}[/thumb]?exp&sig` (signed) |
@@ -209,6 +209,16 @@ good (APNs `Unregistered`, `BadDeviceToken`; FCM `UNREGISTERED`, `SENDER_ID_MISM
   `google-services.json` goes to the Android app — and under Project settings → Service accounts generate a private
   key; its JSON file is `FCM_SERVICE_ACCOUNT`. The account needs the *Firebase Cloud Messaging API Admin* role
   (the default Firebase Admin SDK account has it).
+
+### Adding a place from a Google Maps link
+
+`POST /maps-links/resolve {text}` reads a pasted Google Maps link: full links, and the app's `maps.app.goo.gl` share
+links, which the API follows itself (hop by hop, Google hosts only, 5 s timeout; the EU consent detour is skipped).
+It returns the place's `name` and `location` (`precise: false` when the link only has a map view), the `url` to keep
+(the short link as pasted, else the full one without tracking parameters) and places already within 150 m, likeliest
+duplicates first. The apps then fill the address and category from a map search and save the link as the place's
+`google_maps_url`, so it opens in Google Maps. Nothing else is taken from Google: the link carries no address,
+hours or category, and reading Google's pages would be against their terms.
 
 ### Places and search
 

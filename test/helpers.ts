@@ -74,6 +74,13 @@ export interface Harness {
   build: (overrides?: Record<string, string>) => Promise<TestApp>;
 }
 
+/** Redirects for Google Maps short links in tests: short URL → where it leads. No real requests are made. */
+export const mapsRedirects: Record<string, string> = {};
+const fakeMapsFetch: typeof fetch = async (input) => {
+  const target = mapsRedirects[String(input)];
+  return new Response(null, target ? { status: 302, headers: { location: target } } : { status: 404 });
+};
+
 /** The categories migration 007 creates, restored before each test. */
 let defaultCategories: Record<string, unknown>[] = [];
 let defaultIcons: Record<string, unknown>[] = [];
@@ -97,6 +104,7 @@ export function setup(): Harness {
         now: () => h.clock.now,
         settingsCacheMs: 0,
         pushSender: pushes,
+        fetchMapsLink: fakeMapsFetch,
       });
     h.app = await h.build();
   });

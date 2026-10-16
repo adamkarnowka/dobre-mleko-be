@@ -37,6 +37,7 @@ import { iconRoutes } from './routes/icons.js';
 import { pushRoutes } from './routes/push.js';
 import { commentRoutes } from './routes/comments.js';
 import { meRoutes } from './routes/me.js';
+import { mapsLinkRoutes } from './routes/maps-links.js';
 import { metaRoutes } from './routes/meta.js';
 import { tagRoutes } from './routes/tags.js';
 import { photoRoutes } from './routes/photos.js';
@@ -66,6 +67,8 @@ export interface AppDeps {
   settingsCacheMs?: number;
   /** Push sender (tests); by default APNs when configured. */
   pushSender?: PushSender;
+  /** Fetch for following Google Maps short links (tests). */
+  fetchMapsLink?: typeof fetch;
 }
 
 export interface Ctx {
@@ -84,6 +87,8 @@ export interface Ctx {
   urls: FileUrls;
   /** Push notifications to people's devices. */
   notifier: Notifier;
+  /** Follows Google Maps short links. */
+  fetchMapsLink: typeof fetch;
   now: () => Date;
 }
 
@@ -197,6 +202,7 @@ export async function buildApp(deps: AppDeps) {
     notifier: new Notifier(sql, deps.pushSender ?? pushSender(config), (error) =>
       app.log.error({ err: error }, 'push notification failed'),
     ),
+    fetchMapsLink: deps.fetchMapsLink ?? fetch,
     now,
   };
   app.addHook('onClose', async () => {
@@ -220,6 +226,7 @@ export async function buildApp(deps: AppDeps) {
   for (const routes of [
     metaRoutes,
     tagRoutes,
+    mapsLinkRoutes,
     authRoutes,
     meRoutes,
     placeRoutes,

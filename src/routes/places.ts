@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { App, Ctx } from '../app.js';
 import { view } from '../app.js';
 import { CATEGORY_ID, requireActiveCategory } from '../categories.js';
+import { isMapsLink } from '../maps-link.js';
 import { CRITERIA, monthStart, type CriterionKey } from '../domain.js';
 import { HttpError, notFound } from '../errors.js';
 import { decodeCursor, page, pagingQuery } from '../paging.js';
@@ -31,6 +32,18 @@ const placeFields = {
     .max(21)
     .nullable(),
   google_place_id: z.string().max(200).nullable(),
+  google_maps_url: z
+    .string()
+    .max(500)
+    .refine((v) => {
+      try {
+        return isMapsLink(new URL(v));
+      } catch {
+        return false;
+      }
+    }, 'expected a Google Maps link (https)')
+    .nullable()
+    .meta({ description: 'A Google Maps link to the place (e.g. `url` from POST /maps-links/resolve)' }),
   card_style: CardStyle.partial().meta({ description: 'Send only the parts to change' }),
 };
 
@@ -45,6 +58,7 @@ const createPlace = z.object({
   tags: placeFields.tags.default([]),
   opening_hours: placeFields.opening_hours.default(null),
   google_place_id: placeFields.google_place_id.default(null),
+  google_maps_url: placeFields.google_maps_url.default(null),
   card_style: placeFields.card_style.default({}),
   rating: ratingBody.omit({ photo_ids: true }).meta({ description: "The author's own rating, required" }),
   photo_ids: z
@@ -150,7 +164,9 @@ export async function loadPlace(ctx: Ctx, placeId: string, userId: string, near?
   if (!row) throw notFound('Place');
 
   const [[extra], photos, [criteria], distribution, [mine], awarders, [myStar], comments, left] = await Promise.all([
-    sql<{ google_place_id: string | null }[]>`select google_place_id from places where id = ${placeId}`,
+    sql<{ google_place_id: string | null; google_maps_url: string | null }[]>`
+      select google_place_id, google_maps_url from places where id = ${placeId}
+    `,
     sql<
       {
         id: string;
@@ -201,6 +217,7 @@ export async function loadPlace(ctx: Ctx, placeId: string, userId: string, near?
   return {
     ...toPlaceSummary(row, v),
     google_place_id: extra!.google_place_id,
+    google_maps_url: extra!.google_maps_url,
     opening_hours: row.opening_hours,
     photos: photos.map((p) => ({ ...toPhoto(p, ctx.urls), uploaded_by: p.uploaded_by })),
     criteria: breakdown,
@@ -297,11 +314,11 @@ export function placeRoutes(app: App, ctx: Ctx) {
         }
         const [created] = await tx<{ id: string }[]>`
           insert into places (name, category, status, price_level, address, lat, lng, description, tags,
-                              opening_hours, google_place_id, added_by, card_layout, photo_filter, filter_intensity,
-                              card_color)
+                              opening_hours, google_place_id, google_maps_url, added_by, card_layout, photo_filter,
+                              filter_intensity, card_color)
           values (${b.name}, ${b.category_id}, ${b.status}, ${b.price_level}, ${b.address}, ${b.location.lat},
                   ${b.location.lng}, ${b.description}, ${b.tags}, ${b.opening_hours ? tx.json(b.opening_hours) : null},
-                  ${b.google_place_id}, ${req.user.id}, ${b.card_style.layout ?? 'auto'},
+                  ${b.google_place_id}, ${b.google_maps_url}, ${req.user.id}, ${b.card_style.layout ?? 'auto'},
                   ${b.card_style.photo_filter ?? 'none'}, ${b.card_style.filter_intensity ?? 100},
                   ${b.card_style.color ?? null})
           returning id
@@ -372,6 +389,7 @@ export function placeRoutes(app: App, ctx: Ctx) {
       if (b.tags !== undefined) set.tags = b.tags;
       if (b.opening_hours !== undefined) set.opening_hours = b.opening_hours ? sql.json(b.opening_hours) : null;
       if (b.google_place_id !== undefined) set.google_place_id = b.google_place_id;
+      if (b.google_maps_url !== undefined) set.google_maps_url = b.google_maps_url;
       if (b.card_style?.layout !== undefined) set.card_layout = b.card_style.layout;
       if (b.card_style?.photo_filter !== undefined) set.photo_filter = b.card_style.photo_filter;
       if (b.card_style?.filter_intensity !== undefined) set.filter_intensity = b.card_style.filter_intensity;

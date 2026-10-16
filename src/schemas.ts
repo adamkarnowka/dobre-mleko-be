@@ -179,6 +179,7 @@ export const Comment = z
 
 export const PlaceDetail = PlaceSummary.extend({
   google_place_id: z.string().nullable(),
+  google_maps_url: z.string().nullable().meta({ description: 'Opens this place in Google Maps' }),
   opening_hours: z.array(OpeningPeriod).nullable(),
   photos: z.array(PhotoFile.extend({ uploaded_by: z.uuid() })),
   criteria: z.array(z.object({ key: criterionKey, average: z.number().nullable(), count: z.number().int() })),
@@ -439,3 +440,27 @@ export const TagList = z
     ),
   })
   .meta({ id: 'TagList' });
+
+export const ResolvedMapsLink = z
+  .object({
+    url: z.string().meta({ description: 'The link to store as `google_maps_url` (short links as pasted)' }),
+    name: z.string().nullable().meta({ description: "The place's name on Google Maps, if the link names one" }),
+    location: z
+      .object({
+        lat: z.number(),
+        lng: z.number(),
+        precise: z.boolean().meta({ description: "False: the map view's centre, near the place but not on it" }),
+      })
+      .nullable(),
+    nearby: z
+      .array(
+        z.object({
+          id: z.uuid(),
+          name: z.string(),
+          category_id: z.string(),
+          distance_m: z.number(),
+        }),
+      )
+      .meta({ description: 'Places already in the app within 150 m, likeliest duplicates first' }),
+  })
+  .meta({ id: 'ResolvedMapsLink' });
